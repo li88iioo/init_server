@@ -58,9 +58,7 @@
 > ### 使用方式
 > 
 > *   **运行脚本**：执行该脚本时，用户可以选择是否安装 Docker、Docker Compose、ZeroTier 等，输入自定义的 SSH 端口，配置 SSH 密钥认证，并决定是否重启服务器。
-
-*   1 
-*   给脚本赋予执行权限：
-*   `chmod +x init_server.sh`
-*   运行脚本：
-*   `sudo ./init_server.sh`
+>*   给脚本赋予执行权限：
+>*   `chmod +x init_server.sh`
+>*   运行脚本：
+>*   `sudo ./init_server.sh`
