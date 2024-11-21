@@ -18,12 +18,13 @@ echo "当前 SSH 服务端口: $CURRENT_SSH_PORT"
 # 询问用户要修改的 SSH 端口
 read -p "请输入要修改的 SSH 端口号 (当前端口为 $CURRENT_SSH_PORT): " SSH_PORT
 
+# 如果用户没有输入端口号，默认使用当前端口
+SSH_PORT=${SSH_PORT:-$CURRENT_SSH_PORT}
+
 # 检查端口是否已经被占用
 if ss -tnlp | grep -q ":$SSH_PORT "; then
-    echo "当前端口 $SSH_PORT 已被占用。"
-else
-    echo "错误: 端口 $SSH_PORT 已经被占用，请选择其他端口."
-    exit 1
+    echo "端口 $SSH_PORT 已经被占用，继续使用当前的 SSH 端口: $CURRENT_SSH_PORT"
+    SSH_PORT=$CURRENT_SSH_PORT
 fi
 
 # 步骤 2: 修改 SSH 配置文件
