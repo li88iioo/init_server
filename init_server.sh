@@ -1,150 +1,143 @@
 #!/bin/bash
 
-# 更新系统
-echo "开始更新系统..."
-apt-get update && apt-get upgrade -y
-
-# 安装 curl（如果未安装）
-echo "开始安装 curl..."
-apt-get install -y curl
-
-# 获取当前 SSH 端口
-echo "检测当前 SSH 端口..."
-ssh_port=$(ss -tnlp | grep ':22' | wc -l)
-if [ $ssh_port -gt 0 ]; then
-    ssh_port=22
-else
-    ssh_port=12580
-fi
-echo "当前 SSH 端口: $ssh_port"
-
-# 询问是否自定义 SSH 端口
-read -p "请输入自定义的 SSH 端口号 (当前端口: $ssh_port，默认 22): " custom_ssh_port
-custom_ssh_port=${custom_ssh_port:-$ssh_port}
-
-if [ "$custom_ssh_port" != "$ssh_port" ]; then
-    echo "正在修改 SSH 端口为 $custom_ssh_port"
-    # 修改 SSH 配置
-    sed -i 's/^#Port 22/Port '$custom_ssh_port'/' /etc/ssh/sshd_config
-    systemctl restart sshd
+# 检查是否以 root 权限运行
+if [ "$(id -u)" -ne 0 ]; then
+    echo "请以 root 用户或使用 sudo 执行此脚本."
+    exit 1
 fi
 
-# 检查并修改 Fail2ban 配置，确保其监控新端口
-echo "正在更新 Fail2ban 配置..."
-fail2ban_config="/etc/fail2ban/jail.local"
-if [ ! -f "$fail2ban_config" ]; then
-    echo "未找到 $fail2ban_config 文件，创建新的配置文件..."
-    touch "$fail2ban_config"
+# 检查当前 SSH 服务的端口
+CURRENT_SSH_PORT=$(ss -tnlp | grep sshd | awk '{print $5}' | sed 's/.*://')
+
+if [ -z "$CURRENT_SSH_PORT" ]; then
+    echo "无法检测到当前 SSH 服务的端口。请确保 SSH 服务已启动并正在运行。"
+    exit 1
 fi
 
-# 更新 Fail2ban 配置中的 SSH 端口
-echo "修改 Fail2ban 配置文件 $fail2ban_config，监控端口 $custom_ssh_port..."
-sed -i "s/^#port = ssh/port = $custom_ssh_port/" "$fail2ban_config"
+# 显示当前 SSH 端口
+echo "当前 SSH 服务端口: $CURRENT_SSH_PORT"
 
-# 重启 Fail2ban 服务
+# 询问用户要更改的 SSH 端口
+read -p "请输入要修改的 SSH 端口号 (当前端口为 $CURRENT_SSH_PORT，默认 22): " SSH_PORT
+SSH_PORT=${SSH_PORT:-22}
+
+# 检查端口是否已经被占用
+if ss -tnlp | grep -q ":$SSH_PORT "; then
+    echo "错误: 端口 $SSH_PORT 已经被占用，请选择其他端口."
+    exit 1
+fi
+
+# 步骤 1: 修改 SSH 配置文件
+echo "正在修改 SSH 配置文件，设置端口为 $SSH_PORT..."
+sed -i "s/^#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
+
+# 步骤 2: 配置防火墙 (UFW)
+echo "配置防火墙，允许端口 $SSH_PORT..."
+ufw allow $SSH_PORT/tcp
+
+# 删除默认的 SSH 端口 22 规则
+if ufw status | grep -q "22/tcp"; then
+    echo "删除防火墙中对端口 22 的允许规则..."
+    ufw delete allow 22/tcp
+fi
+
+# 重新加载防火墙
+echo "重新加载防火墙..."
+ufw reload
+
+# 步骤 3: 配置 Fail2ban
+echo "正在配置 Fail2ban 以监听新的 SSH 端口 $SSH_PORT..."
+
+# 检查是否存在 /etc/fail2ban/jail.local，如果没有则创建
+if [ ! -f /etc/fail2ban/jail.local ]; then
+    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+    echo "创建 jail.local 配置文件..."
+fi
+
+# 更新 Fail2ban 配置
+sed -i "/\[sshd\]/,/^$/s/^#port =.*/port = $SSH_PORT/" /etc/fail2ban/jail.local
+
+# 步骤 4: 重启 SSH 和 Fail2ban 服务
+echo "重启 SSH 服务和 Fail2ban 服务..."
+systemctl restart ssh
 systemctl restart fail2ban
-echo "Fail2ban 配置已更新，并重启服务应用新设置"
 
-# 安装并配置防火墙
-echo "开始安装 UFW 防火墙..."
-apt-get install -y ufw
-ufw allow $custom_ssh_port/tcp
-ufw enable
+# 步骤 5: 配置 SSH 为单密钥登录（禁用密码登录）
+echo "正在配置 SSH 为单密钥登录（禁用密码登录）..."
 
-# 安装并配置 Fail2ban
-echo "开始安装 Fail2ban..."
-apt-get install -y fail2ban
-systemctl enable fail2ban
-systemctl start fail2ban
-echo "Fail2ban 配置完成，最大重试次数为 5，封禁时间为永久"
+# 修改 SSH 配置文件
+sed -i "s/^#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config
+sed -i "s/^#ChallengeResponseAuthentication yes/ChallengeResponseAuthentication no/" /etc/ssh/sshd_config
+sed -i "s/^#UsePAM yes/UsePAM no/" /etc/ssh/sshd_config
+sed -i "s/^#PubkeyAuthentication yes/PubkeyAuthentication yes/" /etc/ssh/sshd_config
 
-# 安装 Docker
-echo "是否安装 Docker? (y/n):"
-read install_docker
-if [ "$install_docker" == "y" ]; then
-    echo "开始安装 Docker..."
-    apt-get install -y docker.io
-    systemctl enable docker
-    systemctl start docker
-else
-    echo "跳过 Docker 安装"
+# 重启 SSH 服务以应用更改
+systemctl restart ssh
+
+# 步骤 6: 检查 SSH 密钥是否存在
+echo "检查 SSH 密钥是否存在..."
+
+# 检查本地用户是否已有密钥对
+if [ ! -f "$HOME/.ssh/id_rsa" ]; then
+    echo "错误: 找不到本地私钥文件 ($HOME/.ssh/id_rsa)。请先生成 SSH 密钥对并确保配置正确。"
+    exit 1
 fi
 
-# 安装 ZeroTier
-echo "是否安装 ZeroTier? (y/n):"
-read install_zerotier
-if [ "$install_zerotier" == "y" ]; then
-    echo "开始安装 ZeroTier..."
-    curl -s https://install.zerotier.com | bash
-else
-    echo "跳过 ZeroTier 安装"
+# 检查本地公钥文件是否存在
+if [ ! -f "$HOME/.ssh/id_rsa.pub" ]; then
+    echo "错误: 找不到本地公钥文件 ($HOME/.ssh/id_rsa.pub)。请先生成 SSH 密钥对并确保配置正确。"
+    exit 1
 fi
 
-# 检查 ZeroTier 状态
-echo "检测 ZeroTier 状态..."
-zt_status=$(zerotier-cli status)
-echo "当前 ZeroTier 状态: $zt_status"
+# 提示用户手动将公钥上传到远程服务器
+echo "请确保您已将公钥复制到远程服务器的 ~/.ssh/authorized_keys 文件中。"
 
-# 获取 ZeroTier 接口信息
-echo "检测 ZeroTier 接口..."
-zt_interface=$(ip a | grep -i 'zerotier' | awk '{print $2}' | sed 's/://')
+# 步骤 7: 安装和配置 ZeroTier
+echo "正在安装 ZeroTier..."
 
-# 如果没有找到 ZeroTier 接口，尝试通过 zerotier-cli 获取接口
-if [ -z "$zt_interface" ]; then
-    echo "未找到 ZeroTier 接口，尝试通过 zerotier-cli 获取接口..."
-    zt_interface=$(zerotier-cli listnetworks | grep 'zt' | awk '{print $1}')
-fi
+# 更新系统包列表并安装 ZeroTier
+apt update && apt upgrade -y
+curl -s https://install.zerotier.com | sudo bash
+apt install zerotier-one -y
 
-# 如果找到了 ZeroTier 接口
-if [ -n "$zt_interface" ]; then
-    echo "找到 ZeroTier 网络接口: $zt_interface"
-    
-    # 获取 ZeroTier 网络接口的 IP 地址
-    zt_ip=$(ip a show $zt_interface | grep inet | awk '{print $2}')
-    
-    # 显示 ZeroTier IP 地址
-    echo "当前 ZeroTier IP 地址: $zt_ip"
-else
-    echo "未找到 ZeroTier 网络接口。"
-    echo "请输入 ZeroTier 网络的 IP 段 (例如 192.168.193.0/24):"
-    read zero_ip_range
-    echo "正在开放 SSH 端口给 ZeroTier 网络 IP 段 $zero_ip_range ..."
-    ufw allow from $zero_ip_range to any port $custom_ssh_port proto tcp
-    echo "已成功开放 SSH 端口给 ZeroTier 网络 IP 段 $zero_ip_range"
-fi
+# 启动 ZeroTier 服务
+systemctl start zerotier-one
+systemctl enable zerotier-one
 
-# 启用 SSH 密钥登录
-echo "是否启用 SSH 密钥登录 (默认是启用)? (y/n):"
-read enable_ssh_key
-enable_ssh_key=${enable_ssh_key:-y}
+# 提示用户加入 ZeroTier 网络
+read -p "请输入 ZeroTier 网络 ID: " ZT_NETWORK_ID
 
-if [[ "$enable_ssh_key" == "y" || "$enable_ssh_key" == "Y" ]]; then
-    echo "启用 SSH 密钥登录..."
-    # 检查用户的公钥是否已上传
-    if [ ! -f "$HOME/.ssh/authorized_keys" ]; then
-        echo "错误：未找到 SSH 公钥，请确保已上传公钥到 $HOME/.ssh/authorized_keys 文件"
-        exit 1
-    fi
-    # 启用 SSH 密钥登录
-    sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-    systemctl restart sshd
-else
-    echo "SSH 密钥登录未启用"
-fi
+# 加入 ZeroTier 网络
+zerotier-cli join $ZT_NETWORK_ID
 
-# 输出当前状态信息
-echo "当前 SSH 端口: $custom_ssh_port"
-echo "当前 Fail2ban 状态: $(systemctl is-active fail2ban)"
-echo "当前 ZeroTier 状态: $(zerotier-cli status)"
-docker_status=$(systemctl is-active docker)
-echo "当前 Docker 状态: $docker_status"
-ssh_status=$(ss -tnlp | grep :$custom_ssh_port)
-echo "当前 SSH 登录状态: $ssh_status"
+# 步骤 8: 手动输入 ZeroTier IP 段并配置防火墙
+echo "请输入 ZeroTier 网络的 IP 段（例如：192.168.193.0/24）："
+read ZT_IP_RANGE
 
-# 是否重启服务器
-echo "是否重启服务器? (y/n):"
-read reboot_choice
-if [ "$reboot_choice" == "y" ]; then
-    echo "正在重启服务器..."
-    reboot
-fi
+echo "正在配置防火墙，允许来自 ZeroTier 网络 $ZT_IP_RANGE 的 SSH 流量..."
+
+# 配置防火墙，允许 ZeroTier 网络 IP 段访问 SSH
+ufw allow from $ZT_IP_RANGE to any port $SSH_PORT proto tcp
+
+# 步骤 9: 显示当前配置
+echo "==== 当前 SSH 配置 ===="
+ss -tnlp | grep ssh
+echo
+
+echo "==== 当前 UFW 防火墙状态 ===="
+ufw status
+echo
+
+echo "==== 当前 Fail2ban 状态 ===="
+fail2ban-client status sshd
+echo
+
+# 步骤 10: 提示用户验证新的 SSH 端口和 SSH 密钥登录
+echo "修改成功！请使用以下命令测试新的 SSH 端口:"
+echo "ssh -p $SSH_PORT <your-username>@<your-server-ip>"
+echo "确保您的 SSH 密钥已正确配置。"
+
+# 步骤 11: 提示用户验证 ZeroTier 网络连接
+echo "ZeroTier 配置完成，您已加入网络 $ZT_NETWORK_ID。"
+echo "您可以通过以下命令查看 ZeroTier 网络接口:"
+echo "ip a"
