@@ -94,6 +94,12 @@ if command -v zerotier-cli &> /dev/null; then
         read network_id
         zerotier-cli join $network_id
     fi
+    
+    # 提取 ZeroTier 网络的 IP 地址
+    echo "检测 ZeroTier 网络..."
+    zt_network_info=$(zerotier-cli listnetworks | grep "zt")
+    zt_ip=$(echo $zt_network_info | awk -F, '{print $3}' | awk '{print $1}')
+    echo "当前 ZeroTier 网络 IP 地址: $zt_ip"
 else
     echo "是否安装 ZeroTier? (y/n):"
     read install_zerotier
