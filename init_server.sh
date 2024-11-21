@@ -72,16 +72,7 @@ if command -v docker &> /dev/null; then
         systemctl restart docker
     fi
 else
-    echo "是否安装 Docker? (y/n):"
-    read install_docker
-    if [ "$install_docker" == "y" ]; then
-        echo "开始安装 Docker..."
-        apt-get install -y docker.io
-        systemctl enable docker
-        systemctl start docker
-    else
-        echo "跳过 Docker 安装"
-    fi
+    echo "跳过 Docker 安装"
 fi
 
 # 检查 ZeroTier 是否已安装
@@ -98,8 +89,13 @@ if command -v zerotier-cli &> /dev/null; then
     # 提取 ZeroTier 网络的 IP 地址
     echo "检测 ZeroTier 网络..."
     zt_network_info=$(zerotier-cli listnetworks | grep "zt")
-    zt_ip=$(echo $zt_network_info | awk -F, '{print $3}' | awk '{print $1}')
-    echo "当前 ZeroTier 网络 IP 地址: $zt_ip"
+    if [ -n "$zt_network_info" ]; then
+        # 提取网络的 IPv4 地址
+        zt_ip=$(echo $zt_network_info | awk -F, '{print $3}' | awk '{print $1}')
+        echo "当前 ZeroTier 网络 IP 地址: $zt_ip"
+    else
+        echo "未检测到 ZeroTier 网络"
+    fi
 else
     echo "是否安装 ZeroTier? (y/n):"
     read install_zerotier
