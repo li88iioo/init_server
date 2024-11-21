@@ -8,17 +8,28 @@ apt update && apt upgrade -y
 echo "开始安装 curl..."
 apt install curl -y
 
-# 检查并修改默认 SSH 端口
-current_ssh_port=$(grep '^Port' /etc/ssh/sshd_config | awk '{print $2}')
-if [ -z "$current_ssh_port" ] || [ "$current_ssh_port" == "22" ]; then
-    read -p "请输入自定义的 SSH 端口号 (默认 22): " ssh_port
-    ssh_port=${ssh_port:-22}
+# 修改默认 SSH 端口
+read -p "请输入自定义的 SSH 端口号 (默认 22): " ssh_port
+ssh_port=${ssh_port:-22}
+
+# 检查当前 SSH 端口
+current_ssh_port=$(grep "^Port " /etc/ssh/sshd_config | awk '{print $2}')
+if [ "$current_ssh_port" == "$ssh_port" ]; then
+    echo "当前 SSH 端口已经是 $ssh_port，是否重新修改端口? (y/n)"
+    read -p "请输入选择 (y/n): " modify_ssh
+    if [[ "$modify_ssh" == "y" || "$modify_ssh" == "Y" ]]; then
+        echo "修改 SSH 配置文件，将端口号改为 $ssh_port"
+        sed -i "s/^Port $current_ssh_port/Port $ssh_port/" /etc/ssh/sshd_config
+        systemctl restart sshd
+        echo "SSH 端口已修改为 $ssh_port"
+    else
+        echo "跳过 SSH 端口修改"
+    fi
+else
     echo "修改 SSH 配置文件，将端口号改为 $ssh_port"
     sed -i "s/^#Port 22/Port $ssh_port/" /etc/ssh/sshd_config
     systemctl restart sshd
     echo "SSH 端口已修改为 $ssh_port"
-else
-    echo "当前 SSH 端口已经是 $current_ssh_port，跳过修改。"
 fi
 
 # 安装 UFW 并开放 SSH 端口
@@ -27,12 +38,10 @@ apt install ufw -y
 ufw allow $ssh_port/tcp
 ufw enable
 
-# 检查并安装 Fail2ban
-fail2ban_config_file="/etc/fail2ban/jail.d/ssh-$ssh_port.conf"
-if [ ! -f "$fail2ban_config_file" ]; then
-    echo "开始安装 Fail2ban..."
-    apt install fail2ban -y
-    cat <<EOL > $fail2ban_config_file
+# 安装 Fail2ban 并配置
+echo "开始安装 Fail2ban..."
+apt install fail2ban -y
+cat <<EOL > /etc/fail2ban/jail.d/ssh-$ssh_port.conf
 [sshd]
 enabled = true
 port    = $ssh_port
@@ -40,11 +49,8 @@ logpath = /var/log/auth.log
 maxretry = 5
 bantime  = -1
 EOL
-    systemctl restart fail2ban
-    echo "Fail2ban 配置完成，最大重试次数为 5，封禁时间为永久"
-else
-    echo "Fail2ban 已经配置了 SSH 端口 $ssh_port，跳过重新配置。"
-fi
+systemctl restart fail2ban
+echo "Fail2ban 配置完成，最大重试次数为 5，封禁时间为永久"
 
 # 是否安装 Docker
 read -p "是否安装 Docker? (y/n): " install_docker
@@ -99,56 +105,26 @@ if [[ "$install_zerotier" == "y" || "$install_zerotier" == "Y" ]]; then
     echo "开始安装 ZeroTier..."
     curl -s https://install.zerotier.com | sudo bash
 
-    # 检查 ZeroTier 是否已经加入网络
-    zerotier_networks=$(sudo zerotier-cli listnetworks)
-
-    if [[ -n "$zerotier_networks" ]]; then
-        echo "当前系统已经加入以下 ZeroTier 网络："
-        echo "$zerotier_networks"
-        read -p "是否加入一个新的 ZeroTier 网络? (y/n): " join_new_network
-        if [[ "$join_new_network" != "y" && "$join_new_network" != "Y" ]]; then
-            echo "跳过加入新网络，继续执行其他步骤..."
-            exit 0
-        fi
-    fi
-
     # 输入 ZeroTier 网络密钥
     read -p "请输入 ZeroTier 网络密钥: " zerotier_network_id
     sudo zerotier-cli join $zerotier_network_id
 
-    # 重试机制：最大尝试次数
-    MAX_RETRIES=5
-    RETRY_INTERVAL=30  # 每次重试的间隔时间为 30 秒
-    RETRIES=0
-
-    while [ $RETRIES -lt $MAX_RETRIES ]; do
-        echo "正在尝试加入 ZeroTier 网络... (尝试次数: $((RETRIES + 1))/$MAX_RETRIES)"
-        sudo zerotier-cli join $zerotier_network_id
-
-        # 检查是否成功加入网络
-        zerotier_status=$(sudo zerotier-cli status)
-        
-        # 判断 ZeroTier 状态中是否包含 "OK" 字符串
-        if [[ "$zerotier_status" == *"OK"* ]]; then
-            echo "ZeroTier 已成功加入网络 $zerotier_network_id"
-            break
-        else
-            echo "ZeroTier 加入网络失败，正在重试..."
-            RETRIES=$((RETRIES + 1))
-            if [ $RETRIES -ge $MAX_RETRIES ]; then
-                echo "加入网络失败，已达到最大重试次数。"
-                exit 1
-            fi
-            sleep $RETRY_INTERVAL
-        fi
-    done
+    # 等待并验证是否加入 ZeroTier 网络
+    echo "正在等待 ZeroTier 加入网络..."
+    sleep 5  # 等待 5 秒
+    zerotier_status=$(sudo zerotier-cli status)
+    if [[ "$zerotier_status" == *"OK"* ]]; then
+        echo "ZeroTier 已成功加入网络 $zerotier_network_id"
+    else
+        echo "错误：ZeroTier 加入网络失败，请检查网络密钥。"
+        exit 1
+    fi
 
     # 获取 ZeroTier 网络分配的 IP 地址
     zerotier_ip=$(sudo zerotier-cli listnetworks | grep $zerotier_network_id | awk '{print $4}')
     if [ -z "$zerotier_ip" ]; then
-        echo "错误：未能自动获取 ZeroTier IP 地址。"
-        # 如果没有自动获取 IP 地址，要求用户手动输入
-        read -p "请输入 ZeroTier 网络分配的 IP 地址: " zerotier_ip
+        echo "错误：未能获取 ZeroTier IP 地址。"
+        exit 1
     else
         echo "ZeroTier 网络 IP 地址: $zerotier_ip"
     fi
@@ -181,6 +157,13 @@ if [[ "$enable_ssh_key" == "y" || "$enable_ssh_key" == "Y" ]]; then
     systemctl restart sshd
     echo "已禁用密码认证，仅允许 SSH 密钥认证登录。"
 fi
+
+# 输出当前状态
+echo "当前 SSH 端口: $(grep '^Port ' /etc/ssh/sshd_config | awk '{print $2}')"
+echo "当前 Fail2ban 状态: $(systemctl is-active fail2ban)"
+echo "当前 ZeroTier 状态: $(sudo zerotier-cli status)"
+echo "当前 SSH 登录状态: $(ss -tuln | grep :$ssh_port)"
+echo "当前 Docker 状态: $(systemctl is-active docker)"
 
 # 是否重启服务器
 read -p "是否重启服务器? (y/n): " reboot_server
