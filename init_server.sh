@@ -18,13 +18,12 @@ echo "当前 SSH 服务端口: $CURRENT_SSH_PORT"
 # 询问用户要修改的 SSH 端口
 read -p "请输入要修改的 SSH 端口号 (当前端口为 $CURRENT_SSH_PORT): " SSH_PORT
 
-# 如果用户没有输入端口号，默认使用当前端口
-SSH_PORT=${SSH_PORT:-$CURRENT_SSH_PORT}
-
 # 检查端口是否已经被占用
 if ss -tnlp | grep -q ":$SSH_PORT "; then
-    echo "端口 $SSH_PORT 已经被占用，继续使用当前的 SSH 端口: $CURRENT_SSH_PORT"
-    SSH_PORT=$CURRENT_SSH_PORT
+    echo "当前端口 $SSH_PORT 已被占用。"
+else
+    echo "错误: 端口 $SSH_PORT 已经被占用，请选择其他端口."
+    exit 1
 fi
 
 # 步骤 2: 修改 SSH 配置文件
@@ -62,18 +61,11 @@ echo "重启 SSH 服务和 Fail2ban 服务..."
 systemctl restart ssh
 systemctl restart fail2ban
 
-# 步骤 6: 检查 SSH 密钥是否存在
-echo "检查 SSH 密钥是否存在..."
+# 步骤 6: 检查本地是否存在 SSH 公钥文件
+echo "检查 SSH 公钥文件 (authorized_keys) 是否存在..."
 
-# 检查本地用户是否已有密钥对
-if [ ! -f "$HOME/.ssh/id_rsa" ]; then
-    echo "错误: 找不到本地私钥文件 ($HOME/.ssh/id_rsa)。请先生成 SSH 密钥对并确保配置正确。"
-    exit 1
-fi
-
-# 检查本地公钥文件是否存在
-if [ ! -f "$HOME/.ssh/id_rsa.pub" ]; then
-    echo "错误: 找不到本地公钥文件 ($HOME/.ssh/id_rsa.pub)。请先生成 SSH 密钥对并确保配置正确。"
+if [ ! -f "$HOME/.ssh/authorized_keys" ]; then
+    echo "错误: 找不到本地公钥文件 ($HOME/.ssh/authorized_keys)。请先将公钥添加到 authorized_keys 文件中。"
     exit 1
 fi
 
