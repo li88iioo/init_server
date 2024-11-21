@@ -6,20 +6,17 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# 检查当前 SSH 服务的端口
-CURRENT_SSH_PORT=$(ss -tnlp | grep sshd | awk '{print $5}' | sed 's/.*://')
-
+# 步骤 1: 检查当前 SSH 服务的端口
+CURRENT_SSH_PORT=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
 if [ -z "$CURRENT_SSH_PORT" ]; then
-    echo "无法检测到当前 SSH 服务的端口。请确保 SSH 服务已启动并正在运行。"
-    exit 1
+    CURRENT_SSH_PORT=22
 fi
 
 # 显示当前 SSH 端口
 echo "当前 SSH 服务端口: $CURRENT_SSH_PORT"
 
-# 询问用户要更改的 SSH 端口
-read -p "请输入要修改的 SSH 端口号 (当前端口为 $CURRENT_SSH_PORT，默认 22): " SSH_PORT
-SSH_PORT=${SSH_PORT:-22}
+# 询问用户要修改的 SSH 端口
+read -p "请输入要修改的 SSH 端口号 (当前端口为 $CURRENT_SSH_PORT): " SSH_PORT
 
 # 检查端口是否已经被占用
 if ss -tnlp | grep -q ":$SSH_PORT "; then
@@ -27,11 +24,11 @@ if ss -tnlp | grep -q ":$SSH_PORT "; then
     exit 1
 fi
 
-# 步骤 1: 修改 SSH 配置文件
+# 步骤 2: 修改 SSH 配置文件
 echo "正在修改 SSH 配置文件，设置端口为 $SSH_PORT..."
 sed -i "s/^#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
 
-# 步骤 2: 配置防火墙 (UFW)
+# 步骤 3: 配置防火墙 (UFW)
 echo "配置防火墙，允许端口 $SSH_PORT..."
 ufw allow $SSH_PORT/tcp
 
@@ -45,7 +42,7 @@ fi
 echo "重新加载防火墙..."
 ufw reload
 
-# 步骤 3: 配置 Fail2ban
+# 步骤 4: 配置 Fail2ban
 echo "正在配置 Fail2ban 以监听新的 SSH 端口 $SSH_PORT..."
 
 # 检查是否存在 /etc/fail2ban/jail.local，如果没有则创建
@@ -57,22 +54,10 @@ fi
 # 更新 Fail2ban 配置
 sed -i "/\[sshd\]/,/^$/s/^#port =.*/port = $SSH_PORT/" /etc/fail2ban/jail.local
 
-# 步骤 4: 重启 SSH 和 Fail2ban 服务
+# 步骤 5: 重启 SSH 和 Fail2ban 服务
 echo "重启 SSH 服务和 Fail2ban 服务..."
 systemctl restart ssh
 systemctl restart fail2ban
-
-# 步骤 5: 配置 SSH 为单密钥登录（禁用密码登录）
-echo "正在配置 SSH 为单密钥登录（禁用密码登录）..."
-
-# 修改 SSH 配置文件
-sed -i "s/^#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config
-sed -i "s/^#ChallengeResponseAuthentication yes/ChallengeResponseAuthentication no/" /etc/ssh/sshd_config
-sed -i "s/^#UsePAM yes/UsePAM no/" /etc/ssh/sshd_config
-sed -i "s/^#PubkeyAuthentication yes/PubkeyAuthentication yes/" /etc/ssh/sshd_config
-
-# 重启 SSH 服务以应用更改
-systemctl restart ssh
 
 # 步骤 6: 检查 SSH 密钥是否存在
 echo "检查 SSH 密钥是否存在..."
@@ -89,8 +74,20 @@ if [ ! -f "$HOME/.ssh/id_rsa.pub" ]; then
     exit 1
 fi
 
-# 提示用户手动将公钥上传到远程服务器
-echo "请确保您已将公钥复制到远程服务器的 ~/.ssh/authorized_keys 文件中。"
+# 提示用户确认是否开启单密钥登录
+read -p "您是否想启用单密钥登录 (禁用密码登录)？(y/n): " ENABLE_KEY_LOGIN
+if [[ "$ENABLE_KEY_LOGIN" =~ ^[Yy]$ ]]; then
+    echo "正在启用单密钥登录（禁用密码登录）..."
+
+    # 修改 SSH 配置文件
+    sed -i "s/^#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config
+    sed -i "s/^#ChallengeResponseAuthentication yes/ChallengeResponseAuthentication no/" /etc/ssh/sshd_config
+    sed -i "s/^#UsePAM yes/UsePAM no/" /etc/ssh/sshd_config
+    sed -i "s/^#PubkeyAuthentication yes/PubkeyAuthentication yes/" /etc/ssh/sshd_config
+
+    # 重启 SSH 服务以应用更改
+    systemctl restart ssh
+fi
 
 # 步骤 7: 安装和配置 ZeroTier
 echo "正在安装 ZeroTier..."
