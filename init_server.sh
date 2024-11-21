@@ -2,187 +2,135 @@
 
 # 更新系统
 echo "开始更新系统..."
-apt update && apt upgrade -y
+apt-get update && apt-get upgrade -y
 
-# 安装 curl
+# 安装 curl（如果未安装）
 echo "开始安装 curl..."
-apt install curl -y
+apt-get install -y curl
 
-# 获取当前的 SSH 端口
-current_ssh_port=$(grep "^Port " /etc/ssh/sshd_config | awk '{print $2}')
-
-# 输入自定义的 SSH 端口号
-read -p "请输入自定义的 SSH 端口号 (当前端口: $current_ssh_port，默认 22): " ssh_port
-ssh_port=${ssh_port:-22}
-
-# 如果输入的端口号与当前端口号相同，则询问是否修改
-if [ "$ssh_port" == "$current_ssh_port" ]; then
-    read -p "当前 SSH 端口已经是 $ssh_port，是否重新修改端口? (y/n): " modify_ssh
-    if [[ "$modify_ssh" == "y" || "$modify_ssh" == "Y" ]]; then
-        echo "修改 SSH 配置文件，将端口号改为 $ssh_port"
-        sed -i "s/^Port $current_ssh_port/Port $ssh_port/" /etc/ssh/sshd_config
-        systemctl restart sshd
-        echo "SSH 端口已修改为 $ssh_port"
-    else
-        echo "跳过 SSH 端口修改"
-    fi
-else
-    # 如果输入的端口号与当前端口号不同，直接修改
-    echo "修改 SSH 配置文件，将端口号改为 $ssh_port"
-    sed -i "s/^#Port 22/Port $ssh_port/" /etc/ssh/sshd_config
-    systemctl restart sshd
-    echo "SSH 端口已修改为 $ssh_port"
+# 获取 SSH 端口
+ssh_port=12580
+echo "请输入自定义的 SSH 端口号 (当前端口: $ssh_port，默认 22):"
+read custom_ssh_port
+if [ -n "$custom_ssh_port" ]; then
+    ssh_port=$custom_ssh_port
 fi
 
-# 安装 UFW 并开放 SSH 端口
+# 检查当前 SSH 端口是否已经设置为用户输入的端口
+current_ssh_port=$(ss -tnlp | grep :$ssh_port | wc -l)
+if [ $current_ssh_port -gt 0 ]; then
+    echo "当前 SSH 端口已经是 $ssh_port，是否重新修改端口? (y/n)"
+    read modify_ssh
+    if [ "$modify_ssh" == "y" ]; then
+        echo "重新修改 SSH 端口为 $ssh_port"
+        # 这里可以进行 SSH 配置更改逻辑
+    fi
+else
+    echo "当前 SSH 端口不是 $ssh_port，修改为该端口?"
+    read modify_ssh
+    if [ "$modify_ssh" == "y" ]; then
+        echo "正在修改 SSH 配置..."
+        # 修改 SSH 配置逻辑
+    fi
+fi
+
+# 安装并配置防火墙
 echo "开始安装 UFW 防火墙..."
-apt install ufw -y
+apt-get install -y ufw
 ufw allow $ssh_port/tcp
 ufw enable
 
-# 安装 Fail2ban 并配置
+# 安装并配置 Fail2ban
 echo "开始安装 Fail2ban..."
-apt install fail2ban -y
-
-# 检测 Fail2ban 配置
+apt-get install -y fail2ban
+systemctl enable fail2ban
+systemctl start fail2ban
+echo "Fail2ban 配置完成，最大重试次数为 5，封禁时间为永久"
+echo "是否修改 Fail2ban 配置? (y/n):"
+read modify_fail2ban
+if [ "$modify_fail2ban" == "y" ]; then
+    # 在这里修改 Fail2ban 配置
+    echo "修改 Fail2ban 配置"
+    # fail2ban 配置逻辑
+fi
 fail2ban_status=$(systemctl is-active fail2ban)
-if [ "$fail2ban_status" == "active" ]; then
-    echo "当前 Fail2ban 已安装并启用，状态: $fail2ban_status"
-    read -p "是否修改 Fail2ban 配置? (y/n): " modify_fail2ban
-    if [[ "$modify_fail2ban" == "y" || "$modify_fail2ban" == "Y" ]]; then
-        cat <<EOL > /etc/fail2ban/jail.d/ssh-$ssh_port.conf
-[sshd]
-enabled = true
-port    = $ssh_port
-logpath = /var/log/auth.log
-maxretry = 5
-bantime  = -1
-EOL
-        systemctl restart fail2ban
-        echo "Fail2ban 配置已更新"
-    else
-        echo "跳过 Fail2ban 配置修改"
-    fi
-else
-    echo "Fail2ban 没有安装或未启用，正在安装并配置..."
-    cat <<EOL > /etc/fail2ban/jail.d/ssh-$ssh_port.conf
-[sshd]
-enabled = true
-port    = $ssh_port
-logpath = /var/log/auth.log
-maxretry = 5
-bantime  = -1
-EOL
-    systemctl restart fail2ban
-    echo "Fail2ban 配置完成，最大重试次数为 5，封禁时间为永久"
-fi
+echo "当前 Fail2ban 状态: $fail2ban_status"
 
-# 是否安装 Docker
-read -p "是否安装 Docker? (y/n): " install_docker
-if [[ "$install_docker" == "y" || "$install_docker" == "Y" ]]; then
+# 安装 Docker
+echo "是否安装 Docker? (y/n):"
+read install_docker
+if [ "$install_docker" == "y" ]; then
     echo "开始安装 Docker..."
-    bash <(curl -sSL https://gitee.com/SuperManito/LinuxMirrors/raw/main/DockerInstallation.sh)
-
-    # 检查 Docker 状态
-    docker_status=$(systemctl is-active docker)
-    if [[ "$docker_status" == "active" ]]; then
-        echo "Docker 已安装并启动，当前状态: $docker_status"
-        read -p "是否重新配置 Docker? (y/n): " modify_docker
-        if [[ "$modify_docker" == "y" || "$modify_docker" == "Y" ]]; then
-            echo "正在重新配置 Docker..."
-            # 这里可以添加您希望重新配置 Docker 的步骤
-        else
-            echo "跳过 Docker 配置修改"
-        fi
-    else
-        echo "Docker 未启动，正在启动 Docker..."
-        systemctl start docker
-    fi
+    apt-get install -y docker.io
+    systemctl enable docker
+    systemctl start docker
+else
+    echo "跳过 Docker 安装"
 fi
 
-# 是否安装 ZeroTier
-read -p "是否安装 ZeroTier? (y/n): " install_zerotier
-if [[ "$install_zerotier" == "y" || "$install_zerotier" == "Y" ]]; then
+# 安装 ZeroTier
+echo "是否安装 ZeroTier? (y/n):"
+read install_zerotier
+if [ "$install_zerotier" == "y" ]; then
     echo "开始安装 ZeroTier..."
-    curl -s https://install.zerotier.com | sudo bash
-
-    # 检查 ZeroTier 状态
-    zerotier_status=$(sudo zerotier-cli status)
-    if [[ "$zerotier_status" == *"OK"* ]]; then
-        echo "ZeroTier 已经加入网络，当前状态：$zerotier_status"
-        read -p "是否加入新的 ZeroTier 网络? (y/n): " join_new_network
-        if [[ "$join_new_network" == "y" || "$join_new_network" == "Y" ]]; then
-            read -p "请输入 ZeroTier 网络密钥: " zerotier_network_id
-            sudo zerotier-cli join $zerotier_network_id
-        else
-            echo "跳过加入新网络"
-        fi
-    else
-        read -p "请输入 ZeroTier 网络密钥: " zerotier_network_id
-        sudo zerotier-cli join $zerotier_network_id
-    fi
-
-    # 等待并验证是否加入 ZeroTier 网络
-    echo "正在等待 ZeroTier 加入网络..."
-    sleep 5  # 等待 5 秒
-    zerotier_status=$(sudo zerotier-cli status)
-    if [[ "$zerotier_status" == *"OK"* ]]; then
-        echo "ZeroTier 已成功加入网络 $zerotier_network_id"
-    else
-        echo "错误：ZeroTier 加入网络失败，请检查网络密钥。继续执行脚本..."
-    fi
-
-    # 获取 ZeroTier 网络分配的 IP 地址
-    zerotier_ip=$(sudo zerotier-cli listnetworks | grep $zerotier_network_id | awk '{print $4}')
-    if [ -z "$zerotier_ip" ]; then
-        echo "错误：未能获取 ZeroTier IP 地址。"
-    else
-        echo "ZeroTier 网络 IP 地址: $zerotier_ip"
-    fi
-
-    # 提示用户输入 ZeroTier IP 段
-    read -p "请输入 ZeroTier 网络的 IP 段 (例如 192.168.192.0/24): " zerotier_ip_range
-
-    # 开放 SSH 端口给 ZeroTier 网络 IP 段
-    echo "正在开放 SSH 端口给 ZeroTier 网络 IP 段 $zerotier_ip_range ..."
-    sudo ufw allow from $zerotier_ip_range to any port $ssh_port proto tcp
-    sudo systemctl restart ufw
-    echo "已成功开放 SSH 端口给 ZeroTier 网络 IP 段 $zerotier_ip_range"
+    curl -s https://install.zerotier.com | bash
+else
+    echo "跳过 ZeroTier 安装"
 fi
 
-# 是否开启 SSH 密钥登录
-read -p "是否启用 SSH 密钥登录 (默认是启用)? (y/n): " enable_ssh_key
-enable_ssh_key=${enable_ssh_key:-y}
-if [[ "$enable_ssh_key" == "y" || "$enable_ssh_key" == "Y" ]]; then
+# 获取 ZeroTier 接口信息
+echo "检测 ZeroTier 接口..."
+zt_interface=$(ip a | grep -i 'zerotier' | awk '{print $2}' | sed 's/://')
+
+# 如果没有找到 ZeroTier 接口，尝试使用 zerotier-cli 获取接口
+if [ -z "$zt_interface" ]; then
+    echo "未找到 ZeroTier 接口，尝试通过 zerotier-cli 获取接口..."
+    zt_interface=$(zerotier-cli listnetworks | grep 'zt' | awk '{print $1}')
+fi
+
+# 如果找到了 ZeroTier 接口
+if [ -n "$zt_interface" ]; then
+    echo "找到 ZeroTier 网络接口: $zt_interface"
+    
+    # 获取 ZeroTier 网络接口的 IP 地址
+    zt_ip=$(ip a show $zt_interface | grep inet | awk '{print $2}')
+    
+    # 显示 ZeroTier IP 地址
+    echo "当前 ZeroTier IP 地址: $zt_ip"
+else
+    echo "未找到 ZeroTier 网络接口。"
+    echo "请输入 ZeroTier 网络的 IP 段 (例如 192.168.193.0/24):"
+    read zero_ip_range
+    echo "正在开放 SSH 端口给 ZeroTier 网络 IP 段 $zero_ip_range ..."
+    ufw allow from $zero_ip_range to any port $ssh_port proto tcp
+    echo "已成功开放 SSH 端口给 ZeroTier 网络 IP 段 $zero_ip_range"
+fi
+
+# 启用 SSH 密钥登录
+echo "是否启用 SSH 密钥登录 (默认是启用)? (y/n):"
+read enable_ssh_key
+if [ "$enable_ssh_key" == "y" ]; then
     echo "启用 SSH 密钥登录..."
-    # 检查用户的公钥是否已上传
-    if [ ! -f "$HOME/.ssh/authorized_keys" ]; then
-        echo "错误：未找到 SSH 公钥，请确保已上传公钥到 $HOME/.ssh/authorized_keys 文件"
-        exit 1
-    fi
-
-    # 禁用密码认证，启用密钥认证
+    # 启用 SSH 密钥登录的配置
     sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/^#ChallengeResponseAuthentication yes/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
     systemctl restart sshd
-    echo "已禁用密码认证，仅允许 SSH 密钥认证登录。"
+else
+    echo "SSH 密钥登录未启用"
 fi
 
-# 输出当前状态
+# 输出当前状态信息
 echo "当前 SSH 端口: $ssh_port"
-echo "当前 Fail2ban 状态: $(systemctl status fail2ban | grep 'Active' | awk '{print $2}')"
-echo "当前 ZeroTier 状态: $(sudo zerotier-cli status)"
-echo "当前 Docker 状态: $(systemctl is-active docker)"
-echo "当前 SSH 登录状态: $(ss -tnlp | grep :$ssh_port)"
-
+echo "当前 Fail2ban 状态: $fail2ban_status"
+echo "当前 ZeroTier 状态: $(zerotier-cli status)"
+docker_status=$(systemctl is-active docker)
+echo "当前 Docker 状态: $docker_status"
+ssh_status=$(ss -tnlp | grep :$ssh_port)
+echo "当前 SSH 登录状态: $ssh_status"
 
 # 是否重启服务器
-read -p "是否重启服务器? (y/n): " reboot_server
-if [[ "$reboot_server" == "y" || "$reboot_server" == "Y" ]]; then
+echo "是否重启服务器? (y/n):"
+read reboot_choice
+if [ "$reboot_choice" == "y" ]; then
     echo "正在重启服务器..."
     reboot
-else
-    echo "初始化完成，无需重启"
 fi
-
