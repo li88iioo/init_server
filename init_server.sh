@@ -104,6 +104,8 @@ if [[ "$install_zerotier" == "y" || "$install_zerotier" == "Y" ]]; then
 
         # 检查是否成功加入网络
         zerotier_status=$(sudo zerotier-cli status)
+        
+        # 判断 ZeroTier 状态中是否包含 "OK" 字符串
         if [[ "$zerotier_status" == *"OK"* ]]; then
             echo "ZeroTier 已成功加入网络 $zerotier_network_id"
             break
@@ -121,8 +123,9 @@ if [[ "$install_zerotier" == "y" || "$install_zerotier" == "Y" ]]; then
     # 获取 ZeroTier 网络分配的 IP 地址
     zerotier_ip=$(sudo zerotier-cli listnetworks | grep $zerotier_network_id | awk '{print $4}')
     if [ -z "$zerotier_ip" ]; then
-        echo "错误：未能获取 ZeroTier IP 地址。"
-        exit 1
+        echo "错误：未能自动获取 ZeroTier IP 地址。"
+        # 如果没有自动获取 IP 地址，要求用户手动输入
+        read -p "请输入 ZeroTier 网络分配的 IP 地址: " zerotier_ip
     else
         echo "ZeroTier 网络 IP 地址: $zerotier_ip"
     fi
@@ -157,4 +160,12 @@ if [[ "$enable_ssh_key" == "y" || "$enable_ssh_key" == "Y" ]]; then
 fi
 
 # 是否重启服务器
-read -p "是否重启服务器?
+read -p "是否重启服务器? (y/n): " reboot_server
+if [[ "$reboot_server" == "y" || "$reboot_server" == "Y" ]]; then
+    echo "正在重启服务器..."
+    reboot
+else
+    echo "初始化完成，无需重启"
+fi
+
+echo "所有操作已完成"
