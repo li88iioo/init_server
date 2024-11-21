@@ -93,16 +93,30 @@ if [[ "$install_zerotier" == "y" || "$install_zerotier" == "Y" ]]; then
     read -p "请输入 ZeroTier 网络密钥: " zerotier_network_id
     sudo zerotier-cli join $zerotier_network_id
 
-    # 等待并验证是否加入 ZeroTier 网络
-    echo "正在等待 ZeroTier 加入网络..."
-    sleep 5  # 等待 5 秒
-    zerotier_status=$(sudo zerotier-cli status)
-    if [[ "$zerotier_status" == *"OK"* ]]; then
-        echo "ZeroTier 已成功加入网络 $zerotier_network_id"
-    else
-        echo "错误：ZeroTier 加入网络失败，请检查网络密钥。"
-        exit 1
-    fi
+    # 重试机制：最大尝试次数
+    MAX_RETRIES=5
+    RETRY_INTERVAL=30  # 每次重试的间隔时间为 30 秒
+    RETRIES=0
+
+    while [ $RETRIES -lt $MAX_RETRIES ]; do
+        echo "正在尝试加入 ZeroTier 网络... (尝试次数: $((RETRIES + 1))/$MAX_RETRIES)"
+        sudo zerotier-cli join $zerotier_network_id
+
+        # 检查是否成功加入网络
+        zerotier_status=$(sudo zerotier-cli status)
+        if [[ "$zerotier_status" == *"OK"* ]]; then
+            echo "ZeroTier 已成功加入网络 $zerotier_network_id"
+            break
+        else
+            echo "ZeroTier 加入网络失败，正在重试..."
+            RETRIES=$((RETRIES + 1))
+            if [ $RETRIES -ge $MAX_RETRIES ]; then
+                echo "加入网络失败，已达到最大重试次数。"
+                exit 1
+            fi
+            sleep $RETRY_INTERVAL
+        fi
+    done
 
     # 获取 ZeroTier 网络分配的 IP 地址
     zerotier_ip=$(sudo zerotier-cli listnetworks | grep $zerotier_network_id | awk '{print $4}')
@@ -143,12 +157,4 @@ if [[ "$enable_ssh_key" == "y" || "$enable_ssh_key" == "Y" ]]; then
 fi
 
 # 是否重启服务器
-read -p "是否重启服务器? (y/n): " reboot_server
-if [[ "$reboot_server" == "y" || "$reboot_server" == "Y" ]]; then
-    echo "正在重启服务器..."
-    reboot
-else
-    echo "初始化完成，无需重启"
-fi
-
-echo "所有操作已完成"
+read -p "是否重启服务器?
