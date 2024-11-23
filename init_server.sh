@@ -200,7 +200,7 @@ install_fail2ban() {
     success_msg "Fail2ban已安装并启动"
 }
 
-onfigure_fail2ban_ssh() {
+configure_fail2ban_ssh() {
     if ! command -v fail2ban-client &> /dev/null; then
         echo -e "${RED}请先安装Fail2ban${NC}"
         return 1
@@ -252,7 +252,6 @@ check_fail2ban_status() {
     echo "SSH状态:"
     fail2ban-client status sshd
 }
-
 
 # 5. ZeroTier配置
 install_zerotier() {
