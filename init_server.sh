@@ -409,7 +409,7 @@ clear_screen() {
 main_menu() {
     while true; do
         clear_screen
-        echo -e "${BLUE}${BOLD}====== 服务器 简单安全配置菜单 =====${NC}"
+        echo -e "${BLUE}${BOLD}===== 服务器 简单安全 配置菜单 =====${NC}"
         echo -e "${GREEN}${BOLD}1. 更新系统并安装curl${NC}"
         show_separator
         echo -e "${GREEN}${BOLD}2. SSH端口配置${NC}"
