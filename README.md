@@ -1,6 +1,6 @@
 ## 懒人服务器安全配置脚本
 ```
-curl -sSL https://raw.githubusercontent.com/li88iioo/init_server/main/init_server.sh | sudo bash
+wget -P /root -N --no-check-certificate https://raw.githubusercontent.com/li88iioo/init_server/refs/heads/main/init_server.sh && chmod 700 /root/init_server.sh && /root/init_server.sh
 ```
 ### 主要功能
 
