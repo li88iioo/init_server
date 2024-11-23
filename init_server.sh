@@ -317,7 +317,7 @@ ssh_menu() {
         echo -e "${YELLOW}1. 修改SSH端口${NC}"
         echo -e "${YELLOW}2. 查看当前SSH端口${NC}"
         echo -e "${YELLOW}3. 配置SSH密钥认证${NC}"
-        echo -e "${YELLOW}0. 返回主菜单${NC}"
+        echo -e "${GREEN}0. 返回主菜单${NC}"
         echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
@@ -340,7 +340,7 @@ ufw_menu() {
         echo -e "${YELLOW}2. 配置UFW并开放SSH端口${NC}"
         echo -e "${YELLOW}3. 配置UFW PING规则${NC}"
         echo -e "${YELLOW}4. 查看UFW状态${NC}"
-        echo -e "${YELLOW}0. 返回主菜单${NC}"
+        echo -e "${GREEN}0. 返回主菜单${NC}"
         echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
@@ -363,7 +363,7 @@ fail2ban_menu() {
         echo -e "${YELLOW}1. 安装Fail2ban${NC}"
         echo -e "${YELLOW}2. 配置Fail2ban SSH防护${NC}"
         echo -e "${YELLOW}3. 查看Fail2ban状态${NC}"
-        echo -e "${YELLOW}0. 返回主菜单${NC}"
+        echo -e "${GREEN}0. 返回主菜单${NC}"
         echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
@@ -385,7 +385,7 @@ zerotier_menu() {
         echo -e "${YELLOW}1. 安装并加入网络${NC}"
         echo -e "${YELLOW}2. 查看ZeroTier状态${NC}"
         echo -e "${YELLOW}3. 配置ZeroTier SSH访问${NC}"
-        echo -e "${YELLOW}0. 返回主菜单${NC}"
+        echo -e "${GREEN}0. 返回主菜单${NC}"
         echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
@@ -410,21 +410,21 @@ main_menu() {
     while true; do
         clear_screen
         echo -e "${BLUE}${BOLD}========= 服务器安全配置菜单 ==========${NC}"
-        echo -e "${YELLOW}${BOLD}1. 更新系统并安装curl${NC}"
+        echo -e "${GREEN}${BOLD}1. 更新系统并安装curl${NC}"
         show_separator
-        echo -e "${YELLOW}${BOLD}2. SSH端口配置${NC}"
+        echo -e "${GREEN}${BOLD}2. SSH端口配置${NC}"
         show_separator
-        echo -e "${YELLOW}${BOLD}3. UFW防火墙配置${NC}"
+        echo -e "${GREEN}${BOLD}3. UFW防火墙配置${NC}"
         show_separator
-        echo -e "${YELLOW}${BOLD}4. Fail2ban配置${NC}"
+        echo -e "${GREEN}${BOLD}4. Fail2ban配置${NC}"
         show_separator
-        echo -e "${YELLOW}${BOLD}5. ZeroTier配置${NC}"
+        echo -e "${GREEN}${BOLD}5. ZeroTier配置${NC}"
         show_separator
-        echo -e "${YELLOW}${BOLD}6. 安装1Panel${NC}"
+        echo -e "${GREEN}${BOLD}6. 安装1Panel${NC}"
         show_separator
-        echo -e "${YELLOW}${BOLD}7. 安装v2ray-agent${NC}"
+        echo -e "${GREEN}${BOLD}7. 安装v2ray-agent${NC}"
         show_separator
-        echo -e "${YELLOW}${BOLD}0. 退出${NC}"
+        echo -e "${RED}${BOLD}0. 退出${NC}"
         echo -e "${BLUE}${BOLD}====================================${NC}"
         
         read -p "请选择操作: " choice
