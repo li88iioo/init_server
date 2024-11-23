@@ -200,7 +200,7 @@ install_fail2ban() {
     success_msg "Fail2ban已安装并启动"
 }
 
-configure_fail2ban_ssh() {
+onfigure_fail2ban_ssh() {
     if ! command -v fail2ban-client &> /dev/null; then
         echo -e "${RED}请先安装Fail2ban${NC}"
         return 1
@@ -215,8 +215,13 @@ configure_fail2ban_ssh() {
         port=22  # 默认端口为22
     fi
 
-    # 生成 Fail2ban 配置
+    # 生成 Fail2ban 配置，添加 DEFAULT 部分
     cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = $bantime
+findtime = 600
+maxretry = $maxretry
+
 [sshd]
 enabled = true
 port = $port
