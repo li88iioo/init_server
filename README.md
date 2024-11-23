@@ -1,6 +1,6 @@
 ## 懒人服务器安全配置脚本
 ```
-sudo curl -sSL https://raw.githubusercontent.com/li88iioo/init_server/main/init_server.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/li88iioo/init_server/main/init_server.sh | sudo bash
 ```
 ### 主要功能
 
