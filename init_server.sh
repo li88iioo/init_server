@@ -314,12 +314,12 @@ install_v2ray_agent() {
 # 子菜单 - SSH配置
 ssh_menu() {
     while true; do
-        echo -e "${YELLOW}========= SSH配置菜单 ==========${NC}"
+        echo -e "${BLUE}========= SSH配置菜单 ==========${NC}"
         echo -e "${YELLOW}1. 修改SSH端口${NC}"
         echo -e "${YELLOW}2. 查看当前SSH端口${NC}"
         echo -e "${YELLOW}3. 配置SSH密钥认证${NC}"
         echo -e "${YELLOW}0. 返回主菜单${NC}"
-        echo -e "${YELLOW}================================${NC}"
+        echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
         case $choice in
@@ -336,13 +336,13 @@ ssh_menu() {
 # 子菜单 - UFW配置
 ufw_menu() {
     while true; do
-        echo -e "${YELLOW}========= UFW配置菜单 ==========${NC}"
+        echo -e "${BLUE}========= UFW配置菜单 ==========${NC}"
         echo -e "${YELLOW}1. 安装UFW${NC}"
         echo -e "${YELLOW}2. 配置UFW并开放SSH端口${NC}"
         echo -e "${YELLOW}3. 配置UFW PING规则${NC}"
         echo -e "${YELLOW}4. 查看UFW状态${NC}"
         echo -e "${YELLOW}0. 返回主菜单${NC}"
-        echo -e "${YELLOW}================================${NC}"
+        echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
         case $choice in
@@ -360,12 +360,12 @@ ufw_menu() {
 # 子菜单 - Fail2ban配置
 fail2ban_menu() {
     while true; do
-        echo -e "${YELLOW}======== Fail2ban配置菜单 ========${NC}"
+        echo -e "${BLUE}======== Fail2ban配置菜单 ========${NC}"
         echo -e "${YELLOW}1. 安装Fail2ban${NC}"
         echo -e "${YELLOW}2. 配置Fail2ban SSH防护${NC}"
         echo -e "${YELLOW}3. 查看Fail2ban状态${NC}"
         echo -e "${YELLOW}0. 返回主菜单${NC}"
-        echo -e "${YELLOW}================================${NC}"
+        echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
         case $choice in
@@ -382,12 +382,12 @@ fail2ban_menu() {
 # 子菜单 - ZeroTier配置
 zerotier_menu() {
     while true; do
-        echo -e "${YELLOW}======= ZeroTier配置菜单 ========${NC}"
+        echo -e "${BLUE}======= ZeroTier配置菜单 ========${NC}"
         echo -e "${YELLOW}1. 安装并加入网络${NC}"
         echo -e "${YELLOW}2. 查看ZeroTier状态${NC}"
         echo -e "${YELLOW}3. 配置ZeroTier SSH访问${NC}"
         echo -e "${YELLOW}0. 返回主菜单${NC}"
-        echo -e "${YELLOW}================================${NC}"
+        echo -e "${BLUE}================================${NC}"
         
         read -p "请选择操作: " choice
         case $choice in
@@ -410,7 +410,7 @@ clear_screen() {
 main_menu() {
     while true; do
         clear_screen
-        echo -e "${YELLOW}${BOLD}========= 服务器安全配置菜单 ==========${NC}"
+        echo -e "${BLUE}${BOLD}========= 服务器安全配置菜单 ==========${NC}"
         echo -e "${YELLOW}${BOLD}1. 更新系统并安装curl${NC}"
         show_separator
         echo -e "${YELLOW}${BOLD}2. SSH端口配置${NC}"
@@ -426,7 +426,7 @@ main_menu() {
         echo -e "${YELLOW}${BOLD}7. 安装v2ray-agent${NC}"
         show_separator
         echo -e "${YELLOW}${BOLD}0. 退出${NC}"
-        echo -e "${YELLOW}${BOLD}====================================${NC}"
+        echo -e "${BLUE}${BOLD}====================================${NC}"
         
         read -p "请选择操作: " choice
         case $choice in
