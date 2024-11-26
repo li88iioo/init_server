@@ -404,8 +404,14 @@ configure_zerotier_ssh() {
 
 # Docker 安装函数
 install_docker() {
-    echo "正在使用 LinuxMirrors 脚本安装 Docker..."
-    bash <(curl -sSL https://gitee.com/SuperManito/LinuxMirrors/raw/main/DockerInstallation.sh)
+#    echo "正在使用 LinuxMirrors 脚本安装 Docker..."
+#    bash <(curl -sSL https://gitee.com/SuperManito/LinuxMirrors/raw/main/DockerInstallation.sh)
+    echo "正在使用官方脚本安装 Docker..."
+    curl -sSL https://get.docker.com/ | sh
+    # 启动 Docker 服务
+    sudo systemctl start docker
+    # 设置 Docker 开机自启
+    sudo systemctl enable docker
     success_msg "Docker 安装完成"
 }
 
