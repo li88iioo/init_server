@@ -22,15 +22,36 @@ success_msg() {
 # 检查程序是否安装
 check_installed() {
     local service_name=$1
-    if ! command -v $service_name &> /dev/null; then
+    
+    # 首先检查命令是否存在
+    if ! command -v "$service_name" &> /dev/null; then
         echo -e "${RED}错误: $service_name 未安装${NC}"
         return 1
     fi
     
-    if ! systemctl is-active --quiet $service_name; then
-        echo -e "${YELLOW}警告: $service_name 服务未运行${NC}"
-        return 1
+    # 对于 ZeroTier，使用特定的状态检查方法
+    if [ "$service_name" == "zerotier-cli" ]; then
+        # 检查 ZeroTier 服务状态
+        local zerotier_status=$(systemctl is-active zerotier-one 2>/dev/null)
+        if [ "$zerotier_status" != "active" ]; then
+            echo -e "${YELLOW}警告: ZeroTier 服务未运行${NC}"
+            return 1
+        fi
+        
+        # 额外检查 ZeroTier 网络连接状态
+        local cli_status=$(zerotier-cli status 2>/dev/null | grep -c "ONLINE")
+        if [ "$cli_status" -eq 0 ]; then
+            echo -e "${YELLOW}警告: ZeroTier 未连接${NC}"
+            return 1
+        fi
+    else
+        # 对于其他服务，使用原有的检查方法
+        if ! systemctl is-active --quiet "$service_name"; then
+            echo -e "${YELLOW}警告: $service_name 服务未运行${NC}"
+            return 1
+        fi
     fi
+    
     return 0
 }
 
@@ -284,11 +305,41 @@ check_zerotier_status() {
 }
 
 configure_zerotier_ssh() {
-    if ! check_installed zerotier-cli; then
+    # 首先检查 ZeroTier 是否已安装和运行
+    if ! command -v zerotier-cli &> /dev/null; then
+        echo -e "${RED}ZeroTier 未安装${NC}"
         return 1
     fi
+
+    # 检查是否有活跃网络
+    local network_count=$(zerotier-cli listnetworks 2>/dev/null | grep -c "OK")
+    if [ "$network_count" -eq 0 ]; then
+        echo -e "${YELLOW}未找到活跃的 ZeroTier 网络${NC}"
+        read -p "是否要先加入 ZeroTier 网络? (y/n): " join_network
+        if [ "$join_network" = "y" ]; then
+            read -p "请输入 ZeroTier 网络ID: " network_id
+            zerotier-cli join "$network_id"
+            return 0
+        else
+            return 1
+        fi
+    fi
+
+    # 获取 ZeroTier 网络 IP
+    local zt_networks=$(zerotier-cli listnetworks | grep -oP '(?<=ips\s)[^\s]+' | tr ',' '\n')
     
-    read -p "请输入ZeroTier虚拟IP段(例如: 192.168.192.0/24): " zt_network
+    if [ -z "$zt_networks" ]; then
+        echo -e "${RED}未获取到 ZeroTier 网络 IP${NC}"
+        return 1
+    fi
+
+    # 显示可用网络
+    echo "可用 ZeroTier 网络:"
+    echo "$zt_networks"
+
+    # 选择网络
+    read -p "请输入要配置的 ZeroTier 网络IP段(例如: 192.168.193.0/24): " zt_network
+    
     current_port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
     ufw allow from "$zt_network" to any port ${current_port:-22} proto tcp
     success_msg "已开放ZeroTier网段的SSH访问"
