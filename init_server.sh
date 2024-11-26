@@ -153,8 +153,8 @@ configure_ufw() {
 }
 
 configure_ufw_ping() {
-    if ! command -v iptables &> /dev/null; then
-        echo -e "${RED}iptables未安装${NC}"
+    if ! command -v ufw &> /dev/null; then
+        echo -e "${RED}请先安装UFW${NC}"
         return 1
     fi  
     
@@ -167,38 +167,26 @@ configure_ufw_ping() {
     
     case $ping_choice in
         1)
-            # 禁止PING
-            /sbin/iptables -A INPUT -p icmp --icmp-type echo-request -j DROP
+            # 禁止PING的方法
+            echo "# 禁止PING" | sudo tee -a /etc/ufw/before.rules > /dev/null
+            echo "-A ufw-before-input -p icmp --icmp-type echo-request -j DROP" | sudo tee -a /etc/ufw/before.rules > /dev/null
             
-            # 手动保存规则
-            /sbin/iptables-save > /etc/iptables/rules.v4
+            # 重新加载UFW规则
+            ufw disable
+            ufw enable
             
-            # 询问是否安装iptables-persistent
-            read -p "是否安装iptables-persistent以自动保存规则? (y/n): " install_persistent
-            
-            if [ "$install_persistent" = "y" ]; then
-                # 更新源
-                apt update
-                
-                # 安装iptables-persistent
-                apt install -y iptables-persistent
-                
-                # 保存当前规则
-                netfilter-persistent save
-                
-                success_msg "已安装iptables-persistent并保存规则"
-            else
-                success_msg "已禁止PING，但未安装iptables-persistent"
-            fi
+            success_msg "已禁止PING"
             ;;
         
         2)
-            # 恢复PING
-            # 删除之前添加的禁PING规则
-            /sbin/iptables -D INPUT -p icmp --icmp-type echo-request -j DROP
+            # 恢复PING的方法
+            # 移除之前添加的禁PING规则
+            sudo sed -i '/# 禁止PING/d' /etc/ufw/before.rules
+            sudo sed -i '/-A ufw-before-input -p icmp --icmp-type echo-request -j DROP/d' /etc/ufw/before.rules
             
-            # 重新保存规则
-            /sbin/iptables-save > /etc/iptables/rules.v4
+            # 重新加载UFW规则
+            ufw disable
+            ufw enable
             
             success_msg "已恢复PING"
             ;;
