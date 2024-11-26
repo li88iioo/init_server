@@ -153,11 +153,6 @@ configure_ufw() {
 }
 
 configure_ufw_ping() {
-    if ! command -v iptables &> /dev/null; then
-        echo -e "${RED}iptables未安装${NC}"
-        return 1
-    fi  
-    
     echo "PING规则管理:"
     echo "1. 禁止PING"
     echo "2. 恢复PING"
@@ -167,38 +162,29 @@ configure_ufw_ping() {
     
     case $ping_choice in
         1)
-            # 禁止PING
-            /sbin/iptables -A INPUT -p icmp --icmp-type echo-request -j DROP
+            # 使用sysctl禁止PING
+            echo 1 | sudo tee /proc/sys/net/ipv4/icmp_echo_ignore_all > /dev/null
             
-            # 手动保存规则
-            /sbin/iptables-save > /etc/iptables/rules.v4
-            
-            # 询问是否安装iptables-persistent
-            read -p "是否安装iptables-persistent以自动保存规则? (y/n): " install_persistent
-            
-            if [ "$install_persistent" = "y" ]; then
-                # 更新源
-                apt update
-                
-                # 安装iptables-persistent
-                apt install -y iptables-persistent
-                
-                # 保存当前规则
-                netfilter-persistent save
-                
-                success_msg "已安装iptables-persistent并保存规则"
-            else
-                success_msg "已禁止PING，但未安装iptables-persistent"
+            # 永久生效
+            if ! grep -q "net.ipv4.icmp_echo_ignore_all = 1" /etc/sysctl.conf; then
+                echo "net.ipv4.icmp_echo_ignore_all = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
             fi
+            
+            # 应用更改
+            sudo sysctl -p > /dev/null
+            
+            success_msg "已禁止PING"
             ;;
         
         2)
-            # 恢复PING
-            # 删除之前添加的禁PING规则
-            /sbin/iptables -D INPUT -p icmp --icmp-type echo-request -j DROP
+            # 使用sysctl恢复PING
+            echo 0 | sudo tee /proc/sys/net/ipv4/icmp_echo_ignore_all > /dev/null
             
-            # 重新保存规则
-            /sbin/iptables-save > /etc/iptables/rules.v4
+            # 修改sysctl.conf中的配置
+            sudo sed -i 's/net.ipv4.icmp_echo_ignore_all = 1/net.ipv4.icmp_echo_ignore_all = 0/' /etc/sysctl.conf
+            
+            # 应用更改
+            sudo sysctl -p > /dev/null
             
             success_msg "已恢复PING"
             ;;
