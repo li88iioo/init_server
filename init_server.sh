@@ -160,8 +160,8 @@ configure_ufw_ping() {
     
     read -p "是否禁止PING? (y/n): " answer
     if [ "$answer" = "y" ]; then
-        # 添加proto icmp的正确规则
-        ufw insert 1 deny from any to any proto icmp || error_exit "UFW配置PING规则失败"
+       
+        ufw insert 1 deny from any to any proto icmp-echo || error_exit "UFW配置PING规则失败"
         success_msg "已禁止PING"
     elif [ "$answer" = "n" ]; then
         success_msg "已保持当前PING设置"
