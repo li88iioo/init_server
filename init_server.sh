@@ -294,6 +294,64 @@ configure_zerotier_ssh() {
     success_msg "已开放ZeroTier网段的SSH访问"
 }
 
+# Docker 安装函数
+install_docker() {
+    echo "正在使用 LinuxMirrors 脚本安装 Docker..."
+    bash <(curl -sSL https://gitee.com/SuperManito/LinuxMirrors/raw/main/DockerInstallation.sh)
+    success_msg "Docker 安装完成"
+}
+
+# Docker Compose 安装函数
+install_docker_compose() {
+    echo "正在安装 Docker Compose..."
+    sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+    success_msg "Docker Compose 安装完成"
+}
+
+# UFW Docker 配置函数
+configure_ufw_docker() {
+    echo "正在配置 UFW Docker 规则..."
+    
+    # 备份原始配置文件
+    cp /etc/ufw/after.rules /etc/ufw/after.rules.backup
+    
+    # 追加 Docker UFW 规则
+    cat >> /etc/ufw/after.rules << 'EOF'
+# BEGIN UFW AND DOCKER
+*filter
+:ufw-user-forward - [0:0]
+:ufw-docker-logging-deny - [0:0]
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -j ufw-user-forward
+
+-A DOCKER-USER -j RETURN -s 10.0.0.0/8
+-A DOCKER-USER -j RETURN -s 172.16.0.0/12
+-A DOCKER-USER -j RETURN -s 192.168.0.0/16
+
+-A DOCKER-USER -p udp -m udp --sport 53 --dport 1024:65535 -j RETURN
+
+-A DOCKER-USER -j ufw-docker-logging-deny -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -d 192.168.0.0/16
+-A DOCKER-USER -j ufw-docker-logging-deny -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -d 10.0.0.0/8
+-A DOCKER-USER -j ufw-docker-logging-deny -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -d 172.16.0.0/12
+-A DOCKER-USER -j ufw-docker-logging-deny -p udp -m udp --dport 0:32767 -d 192.168.0.0/16
+-A DOCKER-USER -j ufw-docker-logging-deny -p udp -m udp --dport 0:32767 -d 10.0.0.0/8
+-A DOCKER-USER -j ufw-docker-logging-deny -p udp -m udp --dport 0:32767 -d 172.16.0.0/12
+
+-A DOCKER-USER -j RETURN
+
+-A ufw-docker-logging-deny -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW DOCKER BLOCK] "
+-A ufw-docker-logging-deny -j DROP
+
+COMMIT
+# END UFW AND DOCKER
+EOF
+
+    # 重启 UFW
+    systemctl restart ufw
+    success_msg "UFW Docker 规则配置完成"
+}
+
 # 6. 1Panel安装
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
@@ -400,6 +458,28 @@ zerotier_menu() {
     done
 }
 
+# Docker 子菜单
+docker_menu() {
+    while true; do
+        echo -e "${BLUE}======= Docker 配置菜单 ========${NC}"
+        echo -e "${YELLOW}1. 安装 Docker${NC}"
+        echo -e "${YELLOW}2. 安装 Docker Compose${NC}"
+        echo -e "${YELLOW}3. 配置 UFW Docker 规则${NC}"
+        echo -e "${GREEN}0. 返回主菜单${NC}"
+        echo -e "${BLUE}================================${NC}"
+        
+        read -p "请选择操作: " choice
+        case $choice in
+            1) install_docker ;;
+            2) install_docker_compose ;;
+            3) configure_ufw_docker ;;
+            0) return ;;
+            *) echo -e "${RED}无效的选择${NC}" ;;
+        esac
+        read -p "按回车键继续..."
+    done
+}
+
 # 清屏函数
 clear_screen() {
     clear || echo -e "\n\n\n\n\n"
@@ -420,9 +500,11 @@ main_menu() {
         show_separator
         echo -e "${GREEN}${BOLD}5. ZeroTier配置${NC}"
         show_separator
-        echo -e "${GREEN}${BOLD}6. 安装1Panel${NC}"
+        echo -e "${GREEN}${BOLD}6. Docker配置${NC}"  
         show_separator
-        echo -e "${GREEN}${BOLD}7. 安装v2ray-agent${NC}"
+        echo -e "${GREEN}${BOLD}7. 安装1Panel${NC}"
+        show_separator
+        echo -e "${GREEN}${BOLD}8. 安装v2ray-agent${NC}"
         show_separator
         echo -e "${RED}${BOLD}0. 退出${NC}"
         echo -e "${BLUE}${BOLD}====================================${NC}"
@@ -434,8 +516,9 @@ main_menu() {
             3) ufw_menu ;;
             4) fail2ban_menu ;;
             5) zerotier_menu ;;
-            6) install_1panel ;;
-            7) install_v2ray_agent ;;
+            6) docker_menu ;;
+            7) install_1panel ;;
+            8) install_v2ray_agent ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
