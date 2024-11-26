@@ -352,46 +352,6 @@ EOF
     success_msg "UFW Docker 规则配置完成"
 }
 
-# 检查网络延迟函数
-check_network_latency() {
-    echo "正在测试网络延迟..."
-    
-    # 定义多个测试目标，增加可靠性
-    local targets=(
-        "baidu.com"
-        "google.com"
-        "cloudflare.com"
-    )
-    
-    local total_latency=0
-    local successful_pings=0
-    
-    for target in "${targets[@]}"; do
-        local ping_result=$(ping -c 4 "$target" | grep "avg" | awk -F'/' '{print $5}')
-        
-        if [[ -n "$ping_result" ]]; then
-            total_latency=$(echo "$total_latency + $ping_result" | bc)
-            ((successful_pings++))
-        fi
-    done
-    
-    if ((successful_pings > 0)); then
-        local avg_latency=$(echo "scale=2; $total_latency / $successful_pings" | bc)
-        echo -e "${GREEN}平均延迟: ${avg_latency} ms${NC}"
-        
-        # 根据延迟给出颜色提示
-        if (( $(echo "$avg_latency < 50" | bc -l) )); then
-            echo -e "${GREEN}网络状态：优秀${NC}"
-        elif (( $(echo "$avg_latency < 100" | bc -l) )); then
-            echo -e "${YELLOW}网络状态：良好${NC}"
-        else
-            echo -e "${RED}网络状态：较差${NC}"
-        fi
-    else
-        echo -e "${RED}无法测试网络延迟${NC}"
-    fi
-}
-
 # 6. 1Panel安装
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
@@ -530,7 +490,6 @@ main_menu() {
     while true; do
         clear_screen
         echo -e "${BLUE}${BOLD}===== 服务器 简单安全 配置菜单 =====${NC}"
-        check_network_latency
         echo -e "${GREEN}${BOLD}1. 更新系统并安装curl${NC}"
         show_separator
         echo -e "${GREEN}${BOLD}2. SSH端口配置${NC}"
@@ -567,47 +526,10 @@ main_menu() {
     done
 }
 
-
-# 检测安装PING BC
-install_command() {
-    local command_name=$1
-    local package_name=$2
-
-    if ! command -v "$command_name" >/dev/null 2>&1; then
-        echo -e "${YELLOW}未检测到 $command_name，正在尝试安装...${NC}"
-        
-        # 根据不同的包管理器选择安装方式
-        if command -v apt >/dev/null 2>&1; then
-            apt update
-            apt install -y "$package_name"
-        elif command -v yum >/dev/null 2>&1; then
-            yum install -y "$package_name"
-        elif command -v dnf >/dev/null 2>&1; then
-            dnf install -y "$package_name"
-        elif command -v pacman >/dev/null 2>&1; then
-            pacman -S --noconfirm "$package_name"
-        else
-            error_exit "无法自动安装 $command_name。请手动安装 $package_name"
-        fi
-
-        # 再次检查是否安装成功
-        if ! command -v "$command_name" >/dev/null 2>&1; then
-            error_exit "无法安装 $command_name。请手动安装 $package_name"
-        fi
-
-        success_msg "$command_name 安装成功"
-    fi
-}
-
-
 # 检查root权限
 if [ "$EUID" -ne 0 ]; then 
     error_exit "请使用root权限运行此脚本"
 fi
-
-# 检查并安装必需命令
-install_command ping iputils
-install_command bc bc  
 
 # 运行主菜单
 main_menu
