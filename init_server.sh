@@ -599,21 +599,13 @@ main_menu() {
         clear_screen
         echo -e "${BLUE}${BOLD}===== 服务器 简单安全 配置菜单 =====${NC}"
         echo -e "${GREEN}${BOLD}1. 更新系统并安装curl${NC}"
-        show_separator
         echo -e "${GREEN}${BOLD}2. SSH端口配置${NC}"
-        show_separator
         echo -e "${GREEN}${BOLD}3. UFW防火墙配置${NC}"
-        show_separator
         echo -e "${GREEN}${BOLD}4. Fail2ban配置${NC}"
-        show_separator
         echo -e "${GREEN}${BOLD}5. ZeroTier配置${NC}"
-        show_separator
         echo -e "${GREEN}${BOLD}6. Docker配置${NC}"  
-        show_separator
         echo -e "${GREEN}${BOLD}7. 安装1Panel${NC}"
-        show_separator
         echo -e "${GREEN}${BOLD}8. 安装v2ray-agent${NC}"
-        show_separator
         echo -e "${RED}${BOLD}0. 退出${NC}"
         echo -e "${BLUE}${BOLD}====================================${NC}"
         
