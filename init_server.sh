@@ -276,23 +276,42 @@ check_fail2ban_status() {
 
 # 5. ZeroTier配置
 install_zerotier() {
+    # 检查是否已安装
+    if command -v zerotier-cli &> /dev/null; then
+        echo -e "${YELLOW}ZeroTier已经安装${NC}"
+        return 0
+    fi
+
+    # 安装ZeroTier
     curl -s https://install.zerotier.com | bash || error_exit "ZeroTier安装失败"
+    
+    # 启用并启动服务
     systemctl enable zerotier-one
     systemctl start zerotier-one
     
     # 等待服务完全启动
     sleep 5
     
-    read -p "请输入ZeroTier网络ID: " network_id
-    if [[ ! $network_id =~ ^[0-9a-f]{16}$ ]]; then
-        error_exit "无效的网络ID格式"
+    # 提示用户加入网络
+    read -p "是否要加入ZeroTier网络? (y/n): " join_choice
+    if [[ "$join_choice" == "y" ]]; then
+        read -p "请输入ZeroTier网络ID: " network_id
+        if [[ ! $network_id =~ ^[0-9a-f]{16}$ ]]; then
+            error_exit "无效的网络ID格式"
+        fi
+        
+        zerotier-cli join "$network_id"
     fi
     
-    zerotier-cli join "$network_id"
-    success_msg "ZeroTier已安装并加入网络"
+    success_msg "ZeroTier已安装"
 }
 
 check_zerotier_status() {
+    if ! command -v zerotier-cli &> /dev/null; then
+        echo -e "${RED}ZeroTier未安装${NC}"
+        return 1
+    fi
+
     if ! systemctl is-active --quiet zerotier-one; then
         echo -e "${RED}ZeroTier服务未运行${NC}"
         return 1
@@ -305,44 +324,47 @@ check_zerotier_status() {
 }
 
 configure_zerotier_ssh() {
-    # 首先检查 ZeroTier 是否已安装和运行
+    # 检查ZeroTier是否安装和运行
     if ! command -v zerotier-cli &> /dev/null; then
         echo -e "${RED}ZeroTier 未安装${NC}"
         return 1
     fi
-
+    
     # 检查是否有活跃网络
     local network_count=$(zerotier-cli listnetworks 2>/dev/null | grep -c "OK")
     if [ "$network_count" -eq 0 ]; then
         echo -e "${YELLOW}未找到活跃的 ZeroTier 网络${NC}"
-        read -p "是否要先加入 ZeroTier 网络? (y/n): " join_network
+        read -p "是否要加入 ZeroTier 网络? (y/n): " join_network
         if [ "$join_network" = "y" ]; then
             read -p "请输入 ZeroTier 网络ID: " network_id
+            if [[ ! $network_id =~ ^[0-9a-f]{16}$ ]]; then
+                echo -e "${RED}无效的网络ID格式${NC}"
+                return 1
+            fi
             zerotier-cli join "$network_id"
-            return 0
+            # 给网络一些时间建立连接
+            sleep 3
         else
             return 1
         fi
     fi
-
-    # 获取 ZeroTier 网络 IP
-    local zt_networks=$(zerotier-cli listnetworks | grep -oP '(?<=ips\s)[^\s]+' | tr ',' '\n')
     
-    if [ -z "$zt_networks" ]; then
-        echo -e "${RED}未获取到 ZeroTier 网络 IP${NC}"
+    # 手动输入 ZeroTier 网络 IP 段
+    read -p "请输入 ZeroTier 网络 IP 段(例如: 192.168.88.1/24): " zt_network
+    
+    # 验证输入的网络 IP 段格式
+    if [[ ! "$zt_network" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+        echo -e "${RED}无效的网络 IP 段格式。请使用 CIDR 表示法，例如 192.168.88.1/24${NC}"
         return 1
     fi
-
-    # 显示可用网络
-    echo "可用 ZeroTier 网络:"
-    echo "$zt_networks"
-
-    # 选择网络
-    read -p "请输入要配置的 ZeroTier 网络IP段(例如: 192.168.193.0/24): " zt_network
     
+    # 获取当前 SSH 端口
     current_port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
+    
+    # 使用 UFW 开放指定网段的 SSH 访问
     ufw allow from "$zt_network" to any port ${current_port:-22} proto tcp
-    success_msg "已开放ZeroTier网段的SSH访问"
+    
+    success_msg "已开放 ZeroTier 网段 $zt_network 的 SSH 访问"
 }
 
 # Docker 安装函数
