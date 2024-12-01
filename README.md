@@ -2,7 +2,10 @@
 ```
 wget -P /root -N --no-check-certificate https://raw.githubusercontent.com/li88iioo/init_server/refs/heads/main/init_server.sh && chmod 700 /root/init_server.sh && /root/init_server.sh
 ```
+
 ### 主要功能
+![图片](https://github.com/user-attachments/assets/66bedcec-e8a5-4226-a47a-65183778c472)
+
 
 1. **系统更新与工具安装**：
    - 执行系统更新并安装 `curl`（一个常用的命令行工具，用于进行 HTTP 请求）。
