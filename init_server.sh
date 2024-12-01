@@ -521,23 +521,23 @@ show_docker_container_info() {
 状态: {{.Status}}
 网络: {{.Networks}}
 \n" | while IFS= read -r line; do
-    if [[ -n "$line" ]]; then
-        if [[ "$line" == 容器名称:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 容器ID:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 镜像:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 启动时间:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 状态:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 网络:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-            echo -e "${BLUE}===========================${NC}"
+        if [[ -n "$line" ]]; then
+            if [[ "$line" == 容器名称:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 容器ID:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 镜像:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 启动时间:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 状态:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 网络:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+                echo -e "${BLUE}===========================${NC}"
+            fi
         fi
-    fi
-done
+    done
 
     # 网络信息
     echo -e "\n${YELLOW}Docker 网络及网关详细信息：${NC}"
@@ -552,11 +552,10 @@ done
         echo -e "${BLUE}===========================${NC}"
     done
 }
-    # 网关信息
-    echo -e "\n${YELLOW}网关详细信息：${NC}"
-    docker network inspect bridge | grep Gateway
-    
-}
+
+# 网关信息
+echo -e "\n${YELLOW}网关详细信息：${NC}"
+docker network inspect bridge | grep Gateway
 
 # 6. 1Panel安装
 install_1panel() {
