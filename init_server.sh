@@ -553,10 +553,6 @@ show_docker_container_info() {
     done
 }
 
-# 网关信息
-echo -e "\n${YELLOW}网关详细信息：${NC}"
-docker network inspect bridge | grep Gateway
-
 # 6. 1Panel安装
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
