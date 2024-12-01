@@ -498,7 +498,7 @@ open_docker_port() {
 # Docker 容器信息展示函数
 show_docker_container_info() {
     echo -e "${BLUE}======= Docker 容器信息 ========${NC}"
-    
+
     # 检查是否安装了 Docker
     if ! command -v docker &> /dev/null; then
         echo -e "${RED}Docker 未安装，无法显示容器信息${NC}"
@@ -511,33 +511,26 @@ show_docker_container_info() {
         echo -e "${GREEN}$line${NC}"
         echo -e "${BLUE}===========================${NC}"
     done
-    
+
     echo -e "\n${YELLOW}详细容器信息：${NC}"
-    docker ps -a --format "\
-容器名称: {{.Names}}
-容器ID: {{.ID}}
-镜像: {{.Image}}
-启动时间: {{.CreatedAt}}
-状态: {{.Status}}
-网络: {{.Networks}}
-\n" | while IFS= read -r line; do
-    if [[ -n "$line" ]]; then
-        if [[ "$line" == 容器名称:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 容器ID:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 镜像:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 启动时间:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 状态:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-        elif [[ "$line" == 网络:* ]]; then
-            echo -e "${GREEN}$line${NC}"
-            echo -e "${BLUE}===========================${NC}"
+    docker ps -a --format "容器名称: {{.Names}} 容器ID: {{.ID}} 镜像: {{.Image}} 启动时间: {{.CreatedAt}} 状态: {{.Status}} 网络: {{.Networks}}" | while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            if [[ "$line" == 容器名称:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 容器ID:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 镜像:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 启动时间:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 状态:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+            elif [[ "$line" == 网络:* ]]; then
+                echo -e "${GREEN}$line${NC}"
+                echo -e "${BLUE}===========================${NC}"
+            fi
         fi
-    fi
-done
+    done
 
     # 网络信息
     echo -e "\n${YELLOW}Docker 网络及网关详细信息：${NC}"
@@ -551,7 +544,7 @@ done
         fi
         echo -e "${BLUE}===========================${NC}"
     done
-}
+
     # 网关信息
     echo -e "\n${YELLOW}网关详细信息：${NC}"
     docker network inspect bridge | grep Gateway
