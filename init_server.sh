@@ -731,11 +731,11 @@ system_security_check() {
     ps aux | grep -E ":[0-9]+ \?|defunc"
     
     # 检查磁盘使用情况
-    echo -e "\n${YELLOW}10. 磁盘使用情况：${NC}"
+    echo -e "\n${YELLOW}9. 磁盘使用情况：${NC}"
     df -h
     
     # 检查系统日志中的错误和警告
-    echo -e "\n${YELLOW}9. 系统日志安全摘要：${NC}"
+    echo -e "\n${YELLOW}10. 系统日志安全摘要：${NC}"
     sudo journalctl -p err -n 10
 }
 
