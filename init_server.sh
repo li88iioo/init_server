@@ -958,6 +958,7 @@ main_menu() {
         echo -e "${GREEN}${BOLD}06. Docker配置${NC}"  
         echo -e "${GREEN}${BOLD}07. 安装1Panel${NC}"
         echo -e "${GREEN}${BOLD}08. 安装v2ray-agent${NC}"
+        generate_separator
         echo -e "${GREEN}${BOLD}09. 系统安全检查${NC}"
         echo -e "${GREEN}${BOLD}10. 系统安全加固${NC}"
         echo -e "${GREEN}${BOLD}11. 系统资源监控${NC}"
