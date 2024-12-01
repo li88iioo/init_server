@@ -523,10 +523,19 @@ show_docker_container_info() {
     fi
 done
 
-    # 网络信息
-    echo -e "\n${YELLOW}Docker 网络：${NC}"
-    docker network ls
-
+   # 网络信息
+    echo -e "\n${YELLOW}Docker 网络及网关详细信息：${NC}"
+    docker network ls --format "{{.Name}}" | while read -r network; do
+        echo -e "${YELLOW}网络名称: $network${NC}"
+        gateway=$(docker network inspect "$network" | grep -m 1 "Gateway" | awk -F'"' '{print $4}')
+        if [[ -n "$gateway" ]]; then
+            echo -e "${GREEN}网关: $gateway${NC}"
+        else
+            echo -e "${RED}未找到网关${NC}"
+        fi
+        echo "---"
+    done
+}
     # 网关信息
     echo -e "\n${YELLOW}网关详细信息：${NC}"
     docker network inspect bridge | grep Gateway
