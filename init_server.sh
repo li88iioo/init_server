@@ -513,7 +513,7 @@ open_docker_port() {
 
 # Docker 容器信息展示函数
 show_docker_container_info() {
-    echo -e "${BLUE}======= Docker 容器信息 ========${NC}"
+    echo -e "${BLUE}======= Docker 容器资源信息 ========${NC}"
     
     # 检查是否安装了 Docker
     if ! command -v docker &> /dev/null; then
@@ -521,46 +521,59 @@ show_docker_container_info() {
         return
     fi
 
-    # 获取容器详细信息并添加网络和网关
-    echo -e "\n${YELLOW}详细容器信息：${NC}"
-    docker ps -a --format "\
-容器名称: {{.Names}}
-容器ID: {{.ID}}
-镜像: {{.Image}}
-启动时间: {{.CreatedAt}}
-状态: {{.Status}}
-网络: {{.Networks}}
-\n" | while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            if [[ "$line" == 容器名称:* ]]; then
-                container_name=$(echo "$line" | cut -d ':' -f2 | xargs)  # 获取容器名称
-                echo -e "${GREEN}$line${NC}"
-            elif [[ "$line" == 容器ID:* ]]; then
-                echo -e "${GREEN}$line${NC}"
-            elif [[ "$line" == 镜像:* ]]; then
-                echo -e "${GREEN}$line${NC}"
-            elif [[ "$line" == 启动时间:* ]]; then
-                echo -e "${GREEN}$line${NC}"
-            elif [[ "$line" == 状态:* ]]; then
-                echo -e "${GREEN}$line${NC}"
-            elif [[ "$line" == 网络:* ]]; then
-                network_name=$(echo "$line" | cut -d ':' -f2 | xargs)  # 获取网络名称
-                echo -e "${GREEN}$line${NC}"
-                
-                # 获取网络网关
-                gateway=$(docker network inspect "$network_name" | grep -m 1 "Gateway" | awk -F'"' '{print $4}')
-                if [[ -n "$gateway" ]]; then
-                    echo -e "${GREEN}网关: $gateway${NC}"
-                else
-                    echo -e "${RED}未找到网关${NC}"
-                fi
-                echo -e "${BLUE}===========================${NC}"
-            fi
+    # 检查 Docker 服务是否正常运行
+    if ! docker info &> /dev/null; then
+        echo -e "${RED}Docker 服务未正常运行${NC}"
+        return 1
+    fi
+
+    # 显示容器列表和网络信息
+    echo -e "\n${YELLOW}容器列表：${NC}"
+    docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Networks}}"
+    
+    # 获取所有容器ID
+    container_ids=$(docker ps -aq)
+
+    # 显示详细容器信息和资源使用情况
+    echo -e "\n${YELLOW}详细容器信息和资源使用：${NC}"
+    
+    for container_id in $container_ids; do
+        # 获取容器基本信息
+        container_info=$(docker inspect --format "\
+容器名称: {{.Name}}
+容器ID: {{.Id}}
+镜像: {{.Config.Image}}
+启动时间: {{.Created}}
+状态: {{.State.Status}}
+网络: {{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}" "$container_id")
+
+        # 获取容器资源使用情况
+        resource_info=$(docker stats "$container_id" --no-stream --format "\
+CPU 使用率: {{.CPUPerc}}
+内存使用: {{.MemUsage}}
+网络 I/O: {{.NetIO}}
+块 I/O: {{.BlockIO}}")
+
+        # 网关信息
+        network_name=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' "$container_id")
+        gateway=$(docker network inspect "$network_name" 2>/dev/null | grep -m 1 "Gateway" | awk -F'"' '{print $4}')
+
+        # 输出信息
+        echo -e "${GREEN}$container_info${NC}"
+        echo -e "${YELLOW}资源使用情况：${NC}"
+        echo -e "${GREEN}$resource_info${NC}"
+        
+        if [[ -n "$gateway" ]]; then
+            echo -e "${GREEN}网关: $gateway${NC}"
+        else
+            echo -e "${RED}未找到网关${NC}"
         fi
+        
+        echo -e "${BLUE}===========================${NC}"
     done
     
-    # 显示 Docker 资源使用情况
-    echo -e "\n${YELLOW}Docker 资源使用情况：${NC}"
+    # 显示总体 Docker 资源使用情况
+    echo -e "\n${YELLOW}Docker 总体资源使用情况：${NC}"
     docker system df
 }
 
@@ -794,6 +807,9 @@ main_menu() {
             6) docker_menu ;;
             7) install_1panel ;;
             8) install_v2ray_agent ;;
+            
+            10)system_resource_monitor ;;
+            11)network_diagnostic ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
