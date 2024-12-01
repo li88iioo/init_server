@@ -526,8 +526,8 @@ show_docker_container_info() {
 网络: {{.Networks}}
 \n" | while IFS= read -r line; do
         if [[ -n "$line" ]]; then
-            # 输出动态分隔符
-            separator=$(generate_separator "$line")
+            # 输出分隔符
+            separator=$(show_separator "$line")
             echo -e "${BLUE}$separator${NC}"
             
             # 按行显示容器信息
@@ -551,8 +551,8 @@ show_docker_container_info() {
     # 网络信息
     echo -e "\n${YELLOW}Docker 网络及网关详细信息：${NC}"
     docker network ls --format "{{.Name}}" | while read -r network; do
-        # 输出网络名称的动态分隔符
-        separator=$(generate_separator "$network")
+        # 输出网络名称的分隔符
+        separator=$(show_separator "$network")
         echo -e "${BLUE}$separator${NC}"
         
         echo -e "${YELLOW}网络名称: $network${NC}"
