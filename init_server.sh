@@ -17,9 +17,11 @@ show_separator() {
 generate_separator() {
     local content=$1
     local separator_length=$(( ${#content} + 4 ))  # 给内容两边加上空格
+    separator_length=$((separator_length > 5 ? separator_length : 5))  # 至少5个字符长度
     local separator=$(printf "%-${separator_length}s" "-")  # 生成对应长度的分隔符
     echo "$separator"
 }
+
 
 # 错误处理函数
 error_exit() {
