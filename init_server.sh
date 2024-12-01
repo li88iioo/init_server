@@ -505,15 +505,6 @@ show_docker_container_info() {
         return
     fi
 
-show_docker_container_info() {
-    echo -e "${BLUE}======= Docker 容器信息 ========${NC}"
-    
-    # 检查是否安装了 Docker
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}Docker 未安装，无法显示容器信息${NC}"
-        return
-    fi
-
     # 容器列表信息
     echo -e "${YELLOW}容器列表：${NC}"
     docker ps -a --format "{{.Names}} | 状态：{{.Status}} | 镜像：{{.Image}}" | while IFS= read -r line; do
