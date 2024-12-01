@@ -13,16 +13,6 @@ show_separator() {
     echo -e "${BLUE}------------------------------------${NC}"
 }
 
-# 根据内容长度自动生成分隔符
-generate_separator() {
-    local content=$1
-    local separator_length=$(( ${#content} + 4 ))  # 给内容两边加上空格
-    separator_length=$((separator_length > 5 ? separator_length : 5))  # 至少5个字符长度
-    local separator=$(printf "%-${separator_length}s" "-")  # 生成对应长度的分隔符
-    echo "$separator"
-}
-
-
 # 错误处理更严格
 error_exit() {
     echo -e "${RED}错误: $1${NC}" >&2  # 将错误信息输出到stderr
@@ -958,7 +948,7 @@ main_menu() {
         echo -e "${GREEN}${BOLD}06. Docker配置${NC}"  
         echo -e "${GREEN}${BOLD}07. 安装1Panel${NC}"
         echo -e "${GREEN}${BOLD}08. 安装v2ray-agent${NC}"
-        generate_separator
+        show_separator
         echo -e "${GREEN}${BOLD}09. 系统安全检查${NC}"
         echo -e "${GREEN}${BOLD}10. 系统安全加固${NC}"
         echo -e "${GREEN}${BOLD}11. 系统资源监控${NC}"
