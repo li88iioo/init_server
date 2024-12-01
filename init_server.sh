@@ -666,7 +666,7 @@ docker_menu() {
         echo -e "${YELLOW}1. 安装 Docker${NC}"
         echo -e "${YELLOW}2. 安装 Docker Compose${NC}"
         echo -e "${YELLOW}3. 配置 UFW Docker 规则${NC}"
-        echo -e "${YELLOW}4. 开放 Docker 端口${NC}"
+        echo -e "${YELLOW}4. 开放 Docker 端口（配置完docker ufw生效）${NC}"
         echo -e "${YELLOW}5. 查看 Docker 容器信息${NC}"
         echo -e "${GREEN}0. 返回主菜单${NC}"
         echo -e "${BLUE}================================${NC}"
