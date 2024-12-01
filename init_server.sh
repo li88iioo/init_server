@@ -551,7 +551,7 @@ show_docker_container_info() {
         fi
         echo -e "${BLUE}===========================${NC}"
     done
-}
+}  # 函数结束
 
 # 6. 1Panel安装
 install_1panel() {
