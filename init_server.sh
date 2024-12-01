@@ -967,15 +967,15 @@ main_menu() {
         
         read -p "请选择操作: " choice
         case $choice in
-            1) system_update ;;
-            2) ssh_menu ;;
-            3) ufw_menu ;;
-            4) fail2ban_menu ;;
-            5) zerotier_menu ;;
-            6) docker_menu ;;
-            7) install_1panel ;;
-            8) install_v2ray_agent ;;
-            9) system_security_check ;;
+            01) system_update ;;
+            02) ssh_menu ;;
+            03) ufw_menu ;;
+            04) fail2ban_menu ;;
+            05) zerotier_menu ;;
+            06) docker_menu ;;
+            07) install_1panel ;;
+            08) install_v2ray_agent ;;
+            09) system_security_check ;;
             10) system_security_hardening ;;
             11) system_resource_monitor ;;
             12) network_diagnostic ;;
