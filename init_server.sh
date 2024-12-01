@@ -23,10 +23,16 @@ generate_separator() {
 }
 
 
-# 错误处理函数
+# 错误处理更严格
 error_exit() {
-    echo -e "${RED}错误: $1${NC}"
+    echo -e "${RED}错误: $1${NC}" >&2  # 将错误信息输出到stderr
     exit 1
+}
+
+# 添加日志记录功能
+log_action() {
+    local log_file="/var/log/server_config.log"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$log_file" >/dev/null
 }
 
 # 成功提示函数
@@ -412,7 +418,7 @@ configure_zerotier_ssh() {
     success_msg "已开放 ZeroTier 网段 $zt_network 的 SSH 访问"
 }
 
-# Docker 安装函数
+# 6. Docker 安装函数
 install_docker() {
 #    echo "正在使用 LinuxMirrors 脚本安装 Docker..."
 #    bash <(curl -sSL https://gitee.com/SuperManito/LinuxMirrors/raw/main/DockerInstallation.sh)
@@ -552,9 +558,13 @@ show_docker_container_info() {
             fi
         fi
     done
-}  # 函数结束
+    
+    # 显示 Docker 资源使用情况
+    echo -e "\n${YELLOW}Docker 资源使用情况：${NC}"
+    docker system df
+}
 
-# 6. 1Panel安装
+# 7. 1Panel安装
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
     if [ "$answer" = "y" ]; then
@@ -562,12 +572,76 @@ install_1panel() {
     fi
 }
 
-# 7. v2ray-agent安装
+# 8. v2ray-agent安装
 install_v2ray_agent() {
     read -p "是否安装v2ray-agent? (y/n): " answer
     if [ "$answer" = "y" ]; then
         wget -P /root -N --no-check-certificate https://raw.githubusercontent.com/mack-a/v2ray-agent/master/install.sh && chmod 700 /root/install.sh && /root/install.sh
     fi
+}
+
+# 9. 系统安全检查函数
+# SSH 密钥权限更严格
+configure_ssh_key() {
+    # 增加密钥权限检查
+    if [ -f ~/.ssh/authorized_keys ]; then
+        chmod 600 ~/.ssh/authorized_keys
+        chown $(whoami):$(whoami) ~/.ssh/authorized_keys
+    fi
+    
+    # 禁用弱加密算法
+    sed -i 's/^#\?Ciphers.*/Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com/' /etc/ssh/sshd_config
+}
+
+# 系统安全检查函数
+system_security_check() {
+    echo -e "${YELLOW}执行系统安全检查...${NC}"
+    
+    # 检查开放端口
+    echo "开放端口:"
+    ss -tuln
+    
+    # 检查登录日志
+    echo -e "\n最近登录:"
+    last -a | head -n 10
+    
+    # 检查系统更新情况
+    echo -e "\n系统更新状态:"
+    apt-get -s dist-upgrade | grep "Inst"
+}
+
+# 10. 资源监控函数
+system_resource_monitor() {
+    echo -e "${YELLOW}系统资源监控${NC}"
+    
+    # CPU信息
+    echo -e "\nCPU信息:"
+    lscpu | grep -E "Model name|Socket|Core|Thread"
+    
+    # 内存使用
+    echo -e "\n内存使用:"
+    free -h
+    
+    # 磁盘使用
+    echo -e "\n磁盘使用:"
+    df -h
+}
+
+# 11. 网络诊断函数
+network_diagnostic() {
+    echo -e "${YELLOW}网络诊断${NC}"
+    
+    # 测试公网连接
+    echo "公网连接测试:"
+    ping -c 4 8.8.8.8
+    
+    # DNS解析测试
+    echo -e "\nDNS解析测试:"
+    dig google.com
+    
+    # 路由追踪
+    echo -e "\n路由追踪:"
+    traceroute google.com
 }
 
 # 子菜单 - SSH配置
@@ -704,6 +778,9 @@ main_menu() {
         echo -e "${GREEN}${BOLD}6. Docker配置${NC}"  
         echo -e "${GREEN}${BOLD}7. 安装1Panel${NC}"
         echo -e "${GREEN}${BOLD}8. 安装v2ray-agent${NC}"
+        echo -e "${GREEN}${BOLD}9. 系统安全检查${NC}"
+        echo -e "${GREEN}${BOLD}10. 系统资源监控${NC}"
+        echo -e "${GREEN}${BOLD}11. 网络诊断${NC}"
         echo -e "${RED}${BOLD}0. 退出${NC}"
         echo -e "${BLUE}${BOLD}====================================${NC}"
         
