@@ -946,6 +946,7 @@ main_menu() {
         echo -e "${GREEN}${BOLD}04. Fail2ban配置${NC}"
         echo -e "${GREEN}${BOLD}05. ZeroTier配置${NC}"
         echo -e "${GREEN}${BOLD}06. Docker配置${NC}"  
+        show_separator
         echo -e "${GREEN}${BOLD}07. 安装1Panel${NC}"
         echo -e "${GREEN}${BOLD}08. 安装v2ray-agent${NC}"
         show_separator
