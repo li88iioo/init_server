@@ -694,37 +694,98 @@ install_v2ray_agent() {
     fi
 }
 
-# 9. 系统安全检查函数
-# SSH 密钥权限更严格
-configure_ssh_key() {
-    # 增加密钥权限检查
-    if [ -f ~/.ssh/authorized_keys ]; then
-        chmod 600 ~/.ssh/authorized_keys
-        chown $(whoami):$(whoami) ~/.ssh/authorized_keys
-    fi
-    
-    # 禁用弱加密算法
-    sed -i 's/^#\?Ciphers.*/Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com/' /etc/ssh/sshd_config
-}
-
 # 系统安全检查函数
 system_security_check() {
-    echo -e "${YELLOW}执行系统安全检查...${NC}"
+    echo -e "${BLUE}===== 系统安全全面检查 =====${NC}"
+    
+    # 检查系统基本安全状态
+    echo -e "${YELLOW}1. 系统基本信息：${NC}"
+    uname -a
+    
+    # 检查当前登录用户
+    echo -e "\n${YELLOW}2. 当前登录用户：${NC}"
+    whoami
     
     # 检查开放端口
-    echo "开放端口:"
-    ss -tuln
-    
-    # 检查登录日志
-    echo -e "\n最近登录:"
-    last -a | head -n 10
+    echo -e "\n${YELLOW}3. 开放端口及监听服务：${NC}"
+    sudo netstat -tuln | grep -E ":22\s|:80\s|:443\s"
     
     # 检查系统更新情况
-    echo -e "\n系统更新状态:"
-    apt-get -s dist-upgrade | grep "Inst"
+    echo -e "\n${YELLOW}4. 系统更新状态：${NC}"
+    apt list --upgradable 2>/dev/null
+    
+    # 检查最近登录日志
+    echo -e "\n${YELLOW}5. 最近登录记录：${NC}"
+    last -a | head -n 10
+    
+    # 检查 SSH 配置安全性
+    echo -e "\n${YELLOW}6. SSH 安全配置检查：${NC}"
+    sudo sshd -T | grep -E "permituserenvironment|permitrootlogin|passwordauthentication"
+    
+    # 检查防火墙状态
+    echo -e "\n${YELLOW}7. 防火墙状态：${NC}"
+    sudo ufw status
+    
+    # 检查进程
+    echo -e "\n${YELLOW}8. 异常进程检查：${NC}"
+    ps aux | grep -E ":[0-9]+ \?|defunc"
+    
+    # 检查系统日志中的错误和警告
+    echo -e "\n${YELLOW}9. 系统日志安全摘要：${NC}"
+    sudo journalctl -p err -n 10
+    
+    # 检查磁盘使用情况
+    echo -e "\n${YELLOW}10. 磁盘使用情况：${NC}"
+    df -h
 }
 
-# 10. 资源监控函数
+# 10. 系统安全加固前的确认函数
+system_security_hardening() {
+    echo -e "${RED}警告：系统安全加固将对系统配置进行重大更改！${NC}"
+    read -p "是否确定要进行系统安全加固？(yes/no): " confirm
+
+    if [[ "$confirm" == "yes" ]]; then
+        echo -e "${YELLOW}开始系统安全加固...${NC}"
+        
+        # 备份关键配置文件
+        sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+        sudo cp /etc/security/pwquality.conf /etc/security/pwquality.conf.backup
+
+        # 执行安全加固
+        sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
+        
+        # 禁用不必要的服务
+        sudo systemctl disable bluetooth
+        sudo systemctl disable cups
+        
+        # 设置最大登录尝试次数和超时
+        sudo sed -i 's/.*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+        sudo sed -i 's/.*LoginGraceTime.*/LoginGraceTime 30s/' /etc/ssh/sshd_config
+        
+        # 设置更严格的密码策略
+        sudo apt-get install -y libpam-pwquality
+        sudo bash -c 'cat << EOF > /etc/security/pwquality.conf
+minlen = 12
+dcredit = -1
+ucredit = -1
+ocredit = -1
+lcredit = -1
+EOF'
+        
+        # 重启 SSH 服务
+        sudo systemctl restart ssh
+        
+        echo -e "${GREEN}系统安全加固完成！${NC}"
+        echo -e "${YELLOW}建议：${NC}"
+        echo -e "1. 检查并测试所有系统服务"
+        echo -e "2. 确认远程访问仍然正常"
+        echo -e "3. 如需还原，可使用备份文件"
+    else
+        echo -e "${GREEN}已取消系统安全加固${NC}"
+    fi
+}
+
+# 11. 资源监控函数
 system_resource_monitor() {
     echo -e "${YELLOW}系统资源监控${NC}"
     
@@ -741,7 +802,7 @@ system_resource_monitor() {
     df -h
 }
 
-# 11. 网络诊断函数
+# 12. 网络诊断函数
 network_diagnostic() {
     echo -e "${YELLOW}网络诊断${NC}"
     
@@ -898,8 +959,9 @@ main_menu() {
         echo -e "${GREEN}${BOLD}7. 安装1Panel${NC}"
         echo -e "${GREEN}${BOLD}8. 安装v2ray-agent${NC}"
         echo -e "${GREEN}${BOLD}9. 系统安全检查${NC}"
-        echo -e "${GREEN}${BOLD}10. 系统资源监控${NC}"
-        echo -e "${GREEN}${BOLD}11. 网络诊断${NC}"
+        echo -e "${GREEN}${BOLD}10. 系统安全加固${NC}"
+        echo -e "${GREEN}${BOLD}11. 系统资源监控${NC}"
+        echo -e "${GREEN}${BOLD}12. 网络诊断${NC}"
         echo -e "${RED}${BOLD}0. 退出${NC}"
         echo -e "${BLUE}${BOLD}====================================${NC}"
         
@@ -913,9 +975,10 @@ main_menu() {
             6) docker_menu ;;
             7) install_1panel ;;
             8) install_v2ray_agent ;;
-            
-            10)system_resource_monitor ;;
-            11)network_diagnostic ;;
+            9) system_security_check ;;
+            10) system_security_hardening ;;
+            11) system_resource_monitor ;;
+            12) network_diagnostic ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
