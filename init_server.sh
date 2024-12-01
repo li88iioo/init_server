@@ -513,13 +513,7 @@ show_docker_container_info() {
         return
     fi
 
-    # 容器列表信息
-    echo -e "${YELLOW}容器列表：${NC}"
-    docker ps -a --format "{{.Names}} | 状态：{{.Status}} | 镜像：{{.Image}}" | while IFS= read -r line; do
-        echo -e "${GREEN}$line${NC}"
-        echo -e "${BLUE}===========================${NC}"
-    done
-    
+    # 详细容器信息
     echo -e "\n${YELLOW}详细容器信息：${NC}"
     docker ps -a --format "\
 容器名称: {{.Names}}
@@ -530,6 +524,11 @@ show_docker_container_info() {
 网络: {{.Networks}}
 \n" | while IFS= read -r line; do
         if [[ -n "$line" ]]; then
+            # 输出动态分隔符
+            separator=$(generate_separator "$line")
+            echo -e "${BLUE}$separator${NC}"
+            
+            # 按行显示容器信息
             if [[ "$line" == 容器名称:* ]]; then
                 echo -e "${GREEN}$line${NC}"
             elif [[ "$line" == 容器ID:* ]]; then
@@ -542,7 +541,7 @@ show_docker_container_info() {
                 echo -e "${GREEN}$line${NC}"
             elif [[ "$line" == 网络:* ]]; then
                 echo -e "${GREEN}$line${NC}"
-                echo -e "${BLUE}===========================${NC}"
+                echo -e "${BLUE}$separator${NC}"
             fi
         fi
     done
@@ -550,6 +549,10 @@ show_docker_container_info() {
     # 网络信息
     echo -e "\n${YELLOW}Docker 网络及网关详细信息：${NC}"
     docker network ls --format "{{.Name}}" | while read -r network; do
+        # 输出网络名称的动态分隔符
+        separator=$(generate_separator "$network")
+        echo -e "${BLUE}$separator${NC}"
+        
         echo -e "${YELLOW}网络名称: $network${NC}"
         gateway=$(docker network inspect "$network" | grep -m 1 "Gateway" | awk -F'"' '{print $4}')
         if [[ -n "$gateway" ]]; then
@@ -557,7 +560,7 @@ show_docker_container_info() {
         else
             echo -e "${RED}未找到网关${NC}"
         fi
-        echo -e "${BLUE}===========================${NC}"
+        echo -e "${BLUE}$separator${NC}"
     done
 }  # 函数结束
 
