@@ -507,7 +507,10 @@ show_docker_container_info() {
 
     # 容器列表信息
     echo -e "${YELLOW}容器列表：${NC}"
-    docker ps -a --format "{{.Names}} | 状态：{{.Status}} | 镜像：{{.Image}}"
+    docker ps -a --format "{{.Names}} | 状态：{{.Status}} | 镜像：{{.Image}}" | while IFS= read -r line; do
+        echo -e "${GREEN}$line${NC}"
+        echo -e "${BLUE}===========================${NC}"
+    done
     
     echo -e "\n${YELLOW}详细容器信息：${NC}"
     docker ps -a --format "\
@@ -517,13 +520,22 @@ show_docker_container_info() {
 启动时间: {{.CreatedAt}}
 状态: {{.Status}}
 网络: {{.Networks}}
-" | while IFS= read -r line; do
+\n" | while IFS= read -r line; do
     if [[ -n "$line" ]]; then
-        echo -e "${GREEN}$line${NC}"
-    fi
-    # 如果读取到网络信息，则添加分隔符
-    if [[ "$line" == 网络:* ]]; then
-        echo -e "${BLUE}===========================${NC}"
+        if [[ "$line" == 容器名称:* ]]; then
+            echo -e "${GREEN}$line${NC}"
+        elif [[ "$line" == 容器ID:* ]]; then
+            echo -e "${GREEN}$line${NC}"
+        elif [[ "$line" == 镜像:* ]]; then
+            echo -e "${GREEN}$line${NC}"
+        elif [[ "$line" == 启动时间:* ]]; then
+            echo -e "${GREEN}$line${NC}"
+        elif [[ "$line" == 状态:* ]]; then
+            echo -e "${GREEN}$line${NC}"
+        elif [[ "$line" == 网络:* ]]; then
+            echo -e "${GREEN}$line${NC}"
+            echo -e "${BLUE}===========================${NC}"
+        fi
     fi
 done
 
@@ -537,7 +549,7 @@ done
         else
             echo -e "${RED}未找到网关${NC}"
         fi
-        echo "---"
+        echo -e "${BLUE}===========================${NC}"
     done
 }
     # 网关信息
