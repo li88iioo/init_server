@@ -730,13 +730,13 @@ system_security_check() {
     echo -e "\n${YELLOW}8. 异常进程检查：${NC}"
     ps aux | grep -E ":[0-9]+ \?|defunc"
     
-    # 检查系统日志中的错误和警告
-    echo -e "\n${YELLOW}9. 系统日志安全摘要：${NC}"
-    sudo journalctl -p err -n 10
-    
     # 检查磁盘使用情况
     echo -e "\n${YELLOW}10. 磁盘使用情况：${NC}"
     df -h
+    
+    # 检查系统日志中的错误和警告
+    echo -e "\n${YELLOW}9. 系统日志安全摘要：${NC}"
+    sudo journalctl -p err -n 10
 }
 
 # 10. 系统安全加固前的确认函数
