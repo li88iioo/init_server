@@ -684,7 +684,7 @@ install_v2ray_agent() {
     fi
 }
 
-# 系统安全检查函数
+# 9.系统安全检查函数
 system_security_check() {
     echo -e "${BLUE}===== 系统安全全面检查 =====${NC}"
     
