@@ -496,6 +496,7 @@ open_docker_port() {
 }
 
 # Docker 容器信息展示函数
+# Docker 容器信息展示函数
 show_docker_container_info() {
     echo -e "${BLUE}======= Docker 容器信息 ========${NC}"
     
@@ -530,6 +531,7 @@ done
     # 网关信息
     echo -e "\n${YELLOW}网关详细信息：${NC}"
     docker network inspect bridge | grep Gateway
+    fi
 }
 
 # 6. 1Panel安装
