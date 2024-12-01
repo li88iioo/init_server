@@ -936,7 +936,7 @@ main_menu() {
     while true; do
         clear_screen
         echo -e "${BLUE}${BOLD}===== 服务器简单 安全 配置菜单 =====${NC}"
-        echo -e "${GREEN}${BOLD}01. 更新系统并安装curl${NC}"
+        echo -e "${GREEN}${BOLD}01. 更新系统${NC}"
         echo -e "${GREEN}${BOLD}02. SSH端口配置${NC}"
         echo -e "${GREEN}${BOLD}03. UFW防火墙配置${NC}"
         echo -e "${GREEN}${BOLD}04. Fail2ban配置${NC}"
