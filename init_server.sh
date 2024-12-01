@@ -8,6 +8,19 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# 分隔线
+show_separator() {
+    echo -e "${BLUE}------------------------------------${NC}"
+}
+
+# 根据内容长度自动生成分隔符
+generate_separator() {
+    local content=$1
+    local separator_length=$(( ${#content} + 4 ))  # 给内容两边加上空格
+    local separator=$(printf "%-${separator_length}s" "-")
+    echo "$separator"
+}
+
 # 错误处理函数
 error_exit() {
     echo -e "${RED}错误: $1${NC}"
@@ -53,11 +66,6 @@ check_installed() {
     fi
     
     return 0
-}
-
-# 分隔线
-show_separator() {
-    echo -e "${BLUE}------------------------------------${NC}"
 }
 
 # 1. 系统更新和curl安装
