@@ -80,8 +80,8 @@ check_installed() {
 system_update() {
     echo "正在更新系统..."
     apt update && apt upgrade -y || error_exit "系统更新失败"
-    apt install curl -y || error_exit "curl安装失败"
-    success_msg "系统更新完成，curl已安装"
+    apt install curl -y && apt install -y net-tools|| error_exit "curl&netstat安装失败"
+    success_msg "系统更新完成，curl&netstat 已安装"
 }
 
 # 2. SSH端口相关函数
