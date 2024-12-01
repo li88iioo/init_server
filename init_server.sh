@@ -577,6 +577,107 @@ CPU 使用率: {{.CPUPerc}}
     docker system df
 }
 
+# 删除未使用的 Docker 资源
+clean_docker_resources() {
+    echo -e "${BLUE}======= Docker 资源清理 ========${NC}"
+    
+    # 检查 Docker 是否可用
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}Docker 未安装，无法清理资源${NC}"
+        return 1
+    fi
+
+    # 清理未使用的镜像
+    echo -e "${YELLOW}正在清理未使用的镜像...${NC}"
+    unused_images=$(docker images -f "dangling=true" -q)
+    if [[ -n "$unused_images" ]]; then
+        docker rmi $unused_images
+        echo -e "${GREEN}未使用的镜像已删除${NC}"
+    else
+        echo -e "${GREEN}没有需要清理的未使用镜像${NC}"
+    fi
+
+    # 清理未使用的网络
+    echo -e "\n${YELLOW}正在清理未使用的网络...${NC}"
+    unused_networks=$(docker network ls -f "driver=bridge" -f "type=custom" | grep -v "NETWORK ID" | awk '{print $2}' | grep -v "bridge" | grep -v "host" | grep -v "none")
+    
+    if [[ -n "$unused_networks" ]]; then
+        for network in $unused_networks; do
+            # 检查网络是否正在被使用
+            network_containers=$(docker network inspect "$network" -f '{{range .Containers}}{{.Name}} {{end}}')
+            
+            if [[ -z "$network_containers" ]]; then
+                docker network rm "$network"
+                echo -e "${GREEN}删除未使用网络: $network${NC}"
+            else
+                echo -e "${YELLOW}网络 $network 仍在使用，暂不删除${NC}"
+            fi
+        done
+    else
+        echo -e "${GREEN}没有需要清理的未使用网络${NC}"
+    fi
+
+    # 清理构建缓存
+    echo -e "\n${YELLOW}清理 Docker 构建缓存...${NC}"
+    docker builder prune -f
+
+    # 显示清理后的空间
+    echo -e "\n${YELLOW}Docker 资源清理后的空间情况：${NC}"
+    docker system df
+}
+
+# 显示 Docker 网络详细信息
+show_docker_networks() {
+    echo -e "${BLUE}======= Docker 网络详细信息 ========${NC}"
+    
+    # 检查 Docker 是否可用
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}Docker 未安装，无法显示网络信息${NC}"
+        return 1
+    fi
+
+    # 列出所有网络
+    echo -e "${YELLOW}Docker 网络列表：${NC}"
+    docker network ls
+
+    # 显示每个网络的详细信息
+    networks=$(docker network ls -q)
+    
+    for network in $networks; do
+        echo -e "\n${GREEN}网络详细信息：${NC}"
+        
+        # 网络基本信息
+        network_name=$(docker network inspect "$network" -f '{{.Name}}')
+        network_driver=$(docker network inspect "$network" -f '{{.Driver}}')
+        network_scope=$(docker network inspect "$network" -f '{{.Scope}}')
+        
+        echo -e "${YELLOW}网络名称:${NC} $network_name"
+        echo -e "${YELLOW}网络驱动:${NC} $network_driver"
+        echo -e "${YELLOW}网络范围:${NC} $network_scope"
+
+        # 网络 IPAM 配置
+        subnet=$(docker network inspect "$network" -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+        gateway=$(docker network inspect "$network" -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+        
+        echo -e "${YELLOW}子网:${NC} $subnet"
+        echo -e "${YELLOW}网关:${NC} $gateway"
+
+        # 连接到此网络的容器
+        echo -e "${YELLOW}连接的容器：${NC}"
+        containers=$(docker network inspect "$network" -f '{{range .Containers}}{{.Name}} {{end}}')
+        
+        if [[ -n "$containers" ]]; then
+            for container in $containers; do
+                echo -e "  - ${GREEN}$container${NC}"
+            done
+        else
+            echo -e "  ${RED}无容器连接到此网络${NC}"
+        fi
+
+        echo -e "${BLUE}===========================${NC}"
+    done
+}
+
 # 7. 1Panel安装
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
@@ -756,6 +857,9 @@ docker_menu() {
         echo -e "${YELLOW}3. 配置 UFW Docker 规则${NC}"
         echo -e "${YELLOW}4. 开放 Docker 端口（配置完docker ufw生效）${NC}"
         echo -e "${YELLOW}5. 查看 Docker 容器信息${NC}"
+        echo -e "${YELLOW}6. 清理 Docker 资源${NC}"
+        echo -e "${YELLOW}7. 查看 Docker 网络信息${NC}"
+        
         echo -e "${GREEN}0. 返回主菜单${NC}"
         echo -e "${BLUE}================================${NC}"
         
@@ -766,6 +870,8 @@ docker_menu() {
             3) configure_ufw_docker ;;
             4) open_docker_port ;;
             5) show_docker_container_info ;;
+            6) clean_docker_resources ;;
+            7) show_docker_networks ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
