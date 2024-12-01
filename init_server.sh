@@ -515,7 +515,13 @@ show_docker_container_info() {
         return
     fi
 
-    # 详细容器信息
+    # 容器列表信息
+    echo -e "${YELLOW}容器列表：${NC}"
+    docker ps -a --format "{{.Names}} | 状态：{{.Status}} | 镜像：{{.Image}}" | while IFS= read -r line; do
+        echo -e "${GREEN}$line${NC}"
+        echo -e "${BLUE}===========================${NC}"
+    done
+    
     echo -e "\n${YELLOW}详细容器信息：${NC}"
     docker ps -a --format "\
 容器名称: {{.Names}}
