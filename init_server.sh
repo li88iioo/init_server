@@ -531,7 +531,7 @@ done
     # 网关信息
     echo -e "\n${YELLOW}网关详细信息：${NC}"
     docker network inspect bridge | grep Gateway
-    fi
+    
 }
 
 # 6. 1Panel安装
