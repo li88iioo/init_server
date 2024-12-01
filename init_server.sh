@@ -466,6 +466,72 @@ EOF
     success_msg "UFW Docker 规则配置完成"
 }
 
+# Docker ufw端口开放函数
+open_docker_port() {
+    echo -e "${BLUE}选择开放端口类型：${NC}"
+    echo -e "${YELLOW}1. 开放端口给所有公网IP${NC}"
+    echo -e "${YELLOW}2. 开放端口给指定IP${NC}"
+    echo -e "${GREEN}0. 返回上级菜单${NC}"
+    
+    read -p "请选择操作: " port_choice
+    case $port_choice in
+        1) 
+            read -p "请输入要开放的端口号（容器的实际端口，而非主机映射端口，如-P 8080:80，则开放80端口）: " port
+            sudo ufw route allow proto tcp from any to any port "$port"
+            success_msg "已开放端口 $port 给所有公网IP"
+            ;;
+        2)
+            read -p "请输入要开放的端口号: " port
+            read -p "请输入指定的IP地址: " host_ip
+            sudo ufw route allow from "$host_ip" to any port "$port"
+            success_msg "已开放端口 $port 给 $host_ip"
+            ;;
+        0) 
+            return 
+            ;;
+        *) 
+            echo -e "${RED}无效的选择${NC}" 
+            ;;
+    esac
+}
+
+# Docker 容器信息展示函数
+show_docker_container_info() {
+    echo -e "${BLUE}======= Docker 容器信息 ========${NC}"
+    
+    # 检查是否安装了 Docker
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}Docker 未安装，无法显示容器信息${NC}"
+        return
+    }
+
+    # 容器列表信息
+    echo -e "${YELLOW}容器列表：${NC}"
+    docker ps -a --format "{{.Names}} | 状态：{{.Status}} | 镜像：{{.Image}}"
+    
+    echo -e "\n${YELLOW}详细容器信息：${NC}"
+    docker ps -a --format "
+容器名称: {{.Names}}
+容器ID: {{.ID}}
+镜像: {{.Image}}
+启动时间: {{.CreatedAt}}
+状态: {{.Status}}
+网络: {{.Networks}}
+" | while read -r line; do
+    if [[ -n "$line" ]]; then
+        echo -e "${GREEN}$line${NC}"
+    fi
+done
+
+    # 网络信息
+    echo -e "\n${YELLOW}Docker 网络：${NC}"
+    docker network ls
+
+    # 网关信息
+    echo -e "\n${YELLOW}网关详细信息：${NC}"
+    docker network inspect bridge | grep Gateway
+}
+
 # 6. 1Panel安装
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
@@ -579,6 +645,8 @@ docker_menu() {
         echo -e "${YELLOW}1. 安装 Docker${NC}"
         echo -e "${YELLOW}2. 安装 Docker Compose${NC}"
         echo -e "${YELLOW}3. 配置 UFW Docker 规则${NC}"
+        echo -e "${YELLOW}4. 开放 Docker 端口${NC}"
+        echo -e "${YELLOW}5. 查看 Docker 容器信息${NC}"
         echo -e "${GREEN}0. 返回主菜单${NC}"
         echo -e "${BLUE}================================${NC}"
         
@@ -587,6 +655,8 @@ docker_menu() {
             1) install_docker ;;
             2) install_docker_compose ;;
             3) configure_ufw_docker ;;
+            4) open_docker_port ;;
+            5) show_docker_container_info ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
@@ -603,7 +673,7 @@ clear_screen() {
 main_menu() {
     while true; do
         clear_screen
-        echo -e "${BLUE}${BOLD}===== 服务器 简单安全 配置菜单 =====${NC}"
+        echo -e "${BLUE}${BOLD}===== 服务器简单 安全 配置菜单 =====${NC}"
         echo -e "${GREEN}${BOLD}1. 更新系统并安装curl${NC}"
         echo -e "${GREEN}${BOLD}2. SSH端口配置${NC}"
         echo -e "${GREEN}${BOLD}3. UFW防火墙配置${NC}"
