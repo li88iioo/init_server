@@ -504,19 +504,20 @@ show_docker_container_info() {
         echo -e "${RED}Docker 未安装，无法显示容器信息${NC}"
         return
     fi
+
     # 容器列表信息
     echo -e "${YELLOW}容器列表：${NC}"
     docker ps -a --format "{{.Names}} | 状态：{{.Status}} | 镜像：{{.Image}}"
     
     echo -e "\n${YELLOW}详细容器信息：${NC}"
-    docker ps -a --format "
+    docker ps -a --format "\
 容器名称: {{.Names}}
 容器ID: {{.ID}}
 镜像: {{.Image}}
 启动时间: {{.CreatedAt}}
 状态: {{.Status}}
 网络: {{.Networks}}
-" | while read -r line; do
+" | while IFS= read -r line; do
     if [[ -n "$line" ]]; then
         echo -e "${GREEN}$line${NC}"
     fi
