@@ -69,8 +69,9 @@ check_installed() {
 # 1. 系统更新和curl安装
 system_update() {
     echo "正在更新系统..."
-    apt update && apt upgrade -y || error_exit "系统更新失败"
-    apt install curl -y && apt install -y net-tools|| error_exit "curl&netstat安装失败"
+    apt update && apt upgrade -y || error_exit "系统更新失败"    
+    # 安装curl&net-tools
+    apt install -y curl net-tools || error_exit "curl&netstat安装失败"    
     success_msg "系统更新完成，curl&netstat 已安装"
 }
 
