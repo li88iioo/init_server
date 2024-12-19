@@ -8,7 +8,7 @@ wget -P /root -N --no-check-certificate https://raw.githubusercontent.com/li88ii
 
 
 1. **系统更新与工具安装**：
-   - 执行系统更新并安装 `curl`（一个常用的命令行工具，用于进行 HTTP 请求）。
+   - 更新系统 (apt update) 并安装 curl 和 net-tools。
    
 2. **SSH 配置**：
    - 修改 SSH 默认端口，避免暴力破解攻击。
@@ -26,5 +26,13 @@ wget -P /root -N --no-check-certificate https://raw.githubusercontent.com/li88ii
    - 安装 ZeroTier（一个虚拟局域网软件），并允许服务器加入一个 ZeroTier 网络。
    - 配置 ZeroTier 网络上的 SSH 访问。
 
-6. **其他工具安装**：
-   - 提供选项安装 **1Panel**（一个服务器管理面板）和 **v2ray-agent**（用于安装与管理 V2Ray）。
+6. **Docker 安装和配置**：
+   - 安装 Docker 和 Docker Compose。
+   - 配置 UFW Docker 规则。
+   - 管理 Docker 网络和端口。
+7. **其他工具和检查**：
+   - 安装 1Panel 和 v2ray-agent。
+   - 系统安全检查和加固。
+   - 资源监控和网络诊断。
+
+     
