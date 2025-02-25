@@ -93,8 +93,23 @@ check_ssh_port() {
     echo "当前SSH端口: ${current_port:-22}"
 }
 
+# 检查 authorized_keys 是否配置
+check_authorized_keys() {
+    if [ -f ~/.ssh/authorized_keys ]; then
+        if [ -s ~/.ssh/authorized_keys ]; then
+            echo "authorized_keys 文件已配置"
+        else
+            echo "authorized_keys 文件为空"
+        fi
+    else
+        echo "authorized_keys 文件不存在"
+    fi
+}
+
 # SSH密钥认证配置
 configure_ssh_key() {
+    check_authorized_keys
+    
     if [ ! -f ~/.ssh/authorized_keys ]; then
         echo "未找到authorized_keys文件"
         read -p "是否现在配置SSH密钥?！！！请提前上传密钥以免麻烦 (y/n): " answer
@@ -131,10 +146,11 @@ configure_ssh_key() {
     else
         read -p "是否禁用密码登录? (y/n): " answer
         if [ "$answer" = "y" ]; then
-            sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-            sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+            modify_ssh_config "PasswordAuthentication" "no"
+            modify_ssh_config "ChallengeResponseAuthentication" "no"
+            modify_ssh_config "PermitEmptyPasswords" "no"
             systemctl restart sshd
-            success_msg "已开启仅SSH密钥认证登录"
+            success_msg "已禁用密码登录、挑战响应认证和空密码登录，仅允许SSH密钥认证登录"
         fi
     fi
 }
