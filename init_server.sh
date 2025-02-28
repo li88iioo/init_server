@@ -214,7 +214,7 @@ configure_ssh_key() {
         read -p "是否立即执行安全加固？(y/n): " answer
         if [[ "$answer" =~ [Yy] ]]; then
             # 二次确认
-            read -p "确认要应用以下配置吗？(输入YES确认): " confirm
+            read -p "确认要应用以上配置吗？(输入YES确认，注意大小写): " confirm
             if [ "$confirm" != "YES" ]; then
                 echo -e "${YELLOW}已取消安全加固${NC}"
                 return
