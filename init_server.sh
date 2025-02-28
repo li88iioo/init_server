@@ -97,11 +97,12 @@ check_ssh_port() {
 check_authorized_keys() {
     local key_file=~/.ssh/authorized_keys
     if [ -f "$key_file" ]; then
-        if [ -s "$key_file" ]; then
-            echo -e "${GREEN}authorized_keys 文件已配置且包含有效密钥${NC}"
+        valid_keys=$(grep -cE '^(ssh-(rsa|ed25519)|ecdsa-sha2-nistp[0-9]+)' "$key_file")
+        if [ "$valid_keys" -gt 0 ]; then
+            echo -e "${GREEN}authorized_keys 文件已配置且包含 $valid_keys 个有效密钥${NC}"
             return 0
         else
-            echo -e "${YELLOW}authorized_keys 文件存在但为空${NC}"
+            echo -e "${YELLOW}authorized_keys 文件存在但无有效密钥${NC}"
             return 1
         fi
     else
@@ -109,6 +110,7 @@ check_authorized_keys() {
         return 2
     fi
 }
+
 
 # SSH公钥格式验证函数
 validate_ssh_key() {
@@ -122,7 +124,7 @@ validate_ssh_key() {
     fi
 }
 
-# 修改SSH配置函数（增加备份功能）
+# 修改SSH配置函数
 modify_ssh_config() {
     local key=$1
     local value=$2
@@ -146,106 +148,96 @@ modify_ssh_config() {
     fi
 }
 
-# SSH密钥认证配置（增强版）
+# SSH密钥认证配置
 configure_ssh_key() {
     check_authorized_keys
     local check_result=$?
     
-    # 处理文件不存在或为空的情况
+    # 处理未配置密钥的情况
     if [ $check_result -ne 0 ]; then
-        echo -e "${YELLOW}警告：当前系统未配置有效的SSH密钥认证${NC}"
+        echo -e "${YELLOW}当前系统未配置有效的SSH密钥认证${NC}"
         read -p "是否立即配置SSH密钥认证？(y/n): " answer
-        case $answer in
-            [Yy]* )
-                mkdir -p ~/.ssh || error_exit "无法创建.ssh目录"
-                chmod 700 ~/.ssh
-                touch ~/.ssh/authorized_keys || error_exit "无法创建authorized_keys文件"
-                chmod 600 ~/.ssh/authorized_keys
-
-                # 密钥配置方式选择
-                echo -e "${BLUE}请选择密钥配置方式：${NC}"
-                select key_method in "手动粘贴密钥" "输入密钥内容" "退出"; do
-                    case $key_method in
-                        "手动粘贴密钥")
-                            echo -e "${YELLOW}请执行以下操作："
-                            echo "1. 本地生成SSH密钥对（如果尚未生成）"
-                            echo "2. 使用命令 cat ~/.ssh/id_rsa.pub 显示公钥"
-                            echo "3. 复制公钥内容并粘贴到本终端"
-                            echo "（完成后按Ctrl+D结束输入）${NC}"
-                            echo -n "请粘贴公钥内容："
-                            cat >> ~/.ssh/authorized_keys
-                            
-                            # 验证输入内容
-                            if ! validate_ssh_key "$(cat ~/.ssh/authorized_keys)"; then
-                                rm -f ~/.ssh/authorized_keys
-                                error_exit "输入的密钥内容无效"
-                            fi
-                            break
-                            ;;
-                        "输入密钥内容")
-                            echo -e "${YELLOW}请输入完整的SSH公钥（以'ssh-rsa'或'ssh-ed25519'开头）：${NC}"
-                            read -r pubkey
-                            if validate_ssh_key "$pubkey"; then
-                                echo "$pubkey" >> ~/.ssh/authorized_keys || error_exit "密钥写入失败"
-                            else
-                                error_exit "密钥验证失败"
-                            fi
-                            break
-                            ;;
-                        "退出")
-                            return 1
-                            ;;
-                        *)
-                            echo -e "${RED}无效的选择，请重新输入${NC}"
-                            ;;
-                    esac
-                done
-
-                # 配置后验证测试
-                echo -e "${BLUE}正在进行密钥验证测试...${NC}"
-                if ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no -o ConnectTimeout=10 localhost true 2>/dev/null; then
-                    success_msg "SSH密钥认证测试成功"
-                else
-                    error_exit "密钥认证测试失败，请检查密钥配置"
-                fi
-                ;;
-            * )
-                echo -e "${YELLOW}已跳过SSH密钥配置${NC}"
-                return 1
-                ;;
-        esac
-    fi
-
-    # 密码登录配置（增加二次确认）
-    if [ $check_result -eq 0 ]; then
-        echo -e "${YELLOW}当前已存在有效的SSH密钥配置${NC}"
-        read -p "是否要禁用密码登录？请注意：如果密钥配置错误可能导致无法登录！(y/n): " answer
         if [[ "$answer" =~ [Yy] ]]; then
-            # 二次确认
-            read -p "您确定要禁用密码登录吗？请确保已正确测试密钥登录！(确认请输入YES): " confirm
-            if [ "$confirm" = "YES" ]; then
-                modify_ssh_config "PasswordAuthentication" "no"
-                modify_ssh_config "ChallengeResponseAuthentication" "no"
-                modify_ssh_config "PermitEmptyPasswords" "no"
-                
-                # 安全重启SSH服务
-                if systemctl restart sshd; then
-                    success_msg "已成功禁用密码登录"
-                    echo -e "${YELLOW}提示：您现在只能使用SSH密钥登录系统${NC}"
-                else
-                    error_exit "SSH服务重启失败，请手动检查配置"
-                fi
-            else
-                echo -e "${YELLOW}已取消密码登录禁用操作${NC}"
+            mkdir -p ~/.ssh || error_exit "无法创建.ssh目录"
+            chmod 700 ~/.ssh
+            
+            # 密钥配置选项
+            echo -e "${BLUE}请选择密钥配置方式：${NC}"
+            PS3="请选择(1-3): "
+            select key_method in "自动生成密钥" "手动粘贴密钥" "输入密钥内容"; do
+                case $key_method in
+                    "自动生成密钥")
+                        ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" || error_exit "密钥生成失败"
+                        cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+                        chmod 600 ~/.ssh/authorized_keys
+                        success_msg "Ed25519密钥已生成并配置"
+                        break
+                        ;;
+                    "手动粘贴密钥")
+                        echo -e "${YELLOW}操作步骤：\n1. 本地执行 ssh-keygen -t ed25519\n2. 复制公钥内容（以ssh-ed25519开头）\n3. 粘贴到下方（Ctrl+D结束）${NC}"
+                        if ! cat >> ~/.ssh/authorized_keys; then
+                            error_exit "密钥写入失败"
+                        fi
+                        validate_ssh_key "$(cat ~/.ssh/authorized_keys)" || {
+                            rm -f ~/.ssh/authorized_keys
+                            error_exit "密钥验证失败"
+                        }
+                        break
+                        ;;
+                    "输入密钥内容")
+                        read -r -p "请输入完整公钥: " pubkey
+                        if validate_ssh_key "$pubkey"; then
+                            echo "$pubkey" >> ~/.ssh/authorized_keys || error_exit "密钥写入失败"
+                        fi
+                        break
+                        ;;
+                    *)
+                        echo -e "${RED}无效选择，请重试${NC}"
+                        ;;
+                esac
+            done
+
+            # 验证测试
+            echo -e "${BLUE}正在进行连接验证..."
+            if ! ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no -o ConnectTimeout=10 localhost true 2>/dev/null; then
+                error_exit "本地连接测试失败，请检查密钥配置"
             fi
+            success_msg "密钥验证通过"
         fi
     fi
 
-    # 显示最终配置状态
-    echo -e "\n${BLUE}=== 最终SSH认证状态 ===${NC}"
-    check_authorized_keys
-    sshd -T | grep -E "passwordauthentication|permitemptypasswords"
+    # 安全加固配置
+    if [ $check_result -eq 0 ]; then
+        echo -e "${YELLOW}当前存在有效密钥配置，建议执行安全加固："
+        echo -e "▶ 禁用密码登录\n▶ 仅允许密钥认证的root登录\n▶ 禁用用户环境变量${NC}"
+        
+        read -p "是否立即执行安全加固？(y/n): " answer
+        if [[ "$answer" =~ [Yy] ]]; then
+            # 二次确认
+            read -p "确认要应用以下配置吗？(输入YES确认): " confirm
+            if [ "$confirm" != "YES" ]; then
+                echo -e "${YELLOW}已取消安全加固${NC}"
+                return
+            fi
+
+            # 修改关键配置
+            modify_ssh_config "PermitRootLogin" "without-password"
+            modify_ssh_config "PasswordAuthentication" "no"
+            modify_ssh_config "PermitUserEnvironment" "no"
+            modify_ssh_config "ChallengeResponseAuthentication" "no"
+            modify_ssh_config "PermitEmptyPasswords" "no"
+
+            # 重启服务
+            if systemctl restart sshd; then
+                echo -e "${GREEN}安全加固完成，当前配置："
+                sshd -T | grep -E 'permitrootlogin|passwordauthentication|permituserenvironment'
+            else
+                error_exit "SSH服务重启失败，请检查日志：journalctl -u sshd"
+            fi
+        fi
+    fi
 }
+
 
 # 3. UFW防火墙配置
 install_ufw() {
