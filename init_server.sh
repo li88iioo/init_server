@@ -832,26 +832,34 @@ system_security_check() {
     # 系统基本信息
     echo -e "${BLUE}┃${NC} ${BOLD}1. 系统基本信息${NC}"
     echo -e "${BLUE}┃${NC}"
-    uname -a | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(uname -a)
     
     # 当前登录用户
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}2. 当前登录用户${NC}"
     echo -e "${BLUE}┃${NC}"
-    whoami | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(whoami)
     
     # 开放端口
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}3. 开放端口及监听服务${NC}"
     echo -e "${BLUE}┃${NC}"
-    netstat -tuln | grep -E ":22\s|:80\s|:443\s" | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(netstat -tuln | grep -E ":22\s|:80\s|:443\s")
     
     # 系统更新
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}4. 系统更新状态${NC}"
     echo -e "${BLUE}┃${NC}"
     if command -v apt &> /dev/null; then
-        apt list --upgradable 2>/dev/null | head -n 5 | sed "s/^/${BLUE}┃${NC} /"
+        while IFS= read -r line; do
+            echo -e "${BLUE}┃${NC} $line"
+        done < <(apt list --upgradable 2>/dev/null | head -n 5)
     else
         echo -e "${BLUE}┃${NC} ${YELLOW}不支持的包管理器${NC}"
     fi
@@ -860,14 +868,18 @@ system_security_check() {
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}5. 最近登录记录${NC}"
     echo -e "${BLUE}┃${NC}"
-    last -a | head -n 5 | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(last -a | head -n 5)
     
     # SSH配置
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}6. SSH 安全配置${NC}"
     echo -e "${BLUE}┃${NC}"
     if [ -f /etc/ssh/sshd_config ]; then
-        sshd -T 2>/dev/null | grep -E "permituserenvironment|permitrootlogin|passwordauthentication" | sed "s/^/${BLUE}┃${NC} /"
+        while IFS= read -r line; do
+            echo -e "${BLUE}┃${NC} $line"
+        done < <(sshd -T 2>/dev/null | grep -E "permituserenvironment|permitrootlogin|passwordauthentication")
     else
         echo -e "${BLUE}┃${NC} ${RED}SSH 配置文件不存在${NC}"
     fi
@@ -877,7 +889,9 @@ system_security_check() {
     echo -e "${BLUE}┣━━ ${BOLD}7. 防火墙状态${NC}"
     echo -e "${BLUE}┃${NC}"
     if command -v ufw &> /dev/null; then
-        ufw status | sed "s/^/${BLUE}┃${NC} /"
+        while IFS= read -r line; do
+            echo -e "${BLUE}┃${NC} $line"
+        done < <(ufw status)
     else
         echo -e "${BLUE}┃${NC} ${YELLOW}UFW 未安装${NC}"
     fi
@@ -939,25 +953,33 @@ system_resource_monitor() {
     # CPU信息
     echo -e "${BLUE}┃${NC} ${BOLD}CPU 信息${NC}"
     echo -e "${BLUE}┃${NC}"
-    lscpu | grep -E "Model name|Socket|Core|Thread" | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(lscpu | grep -E "Model name|Socket|Core|Thread")
     
     # 内存使用
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}内存使用情况${NC}"
     echo -e "${BLUE}┃${NC}"
-    free -h | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(free -h)
     
     # 磁盘使用
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}磁盘使用情况${NC}"
     echo -e "${BLUE}┃${NC}"
-    df -h | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(df -h)
     
     # CPU负载
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}CPU 负载${NC}"
     echo -e "${BLUE}┃${NC}"
-    uptime | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(uptime)
     
     show_footer
 }
@@ -970,25 +992,33 @@ network_diagnostic() {
     # 公网连接测试
     echo -e "${BLUE}┃${NC} ${BOLD}公网连接测试${NC}"
     echo -e "${BLUE}┃${NC}"
-    ping -c 4 8.8.8.8 | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(ping -c 4 8.8.8.8)
     
     # DNS解析测试
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}DNS 解析测试${NC}"
     echo -e "${BLUE}┃${NC}"
-    dig google.com +short | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(dig google.com +short)
     
     # 路由追踪
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}路由追踪${NC}"
     echo -e "${BLUE}┃${NC}"
-    traceroute -n google.com | head -n 5 | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(traceroute -n google.com | head -n 5)
     
     # 网络接口
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${BOLD}网络接口信息${NC}"
     echo -e "${BLUE}┃${NC}"
-    ip addr | grep -E "^[0-9]:|inet" | sed "s/^/${BLUE}┃${NC} /"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(ip addr | grep -E "^[0-9]:|inet")
     
     show_footer
 }
