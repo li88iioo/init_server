@@ -1,7 +1,7 @@
 ![image](https://github.com/user-attachments/assets/b5a7fef8-0cf0-49e5-b297-f10126c1440b)
 # 服务器配置管理系统
 
-一个用于快速配置和管理 Linux 服务器的 Shell 脚本工具，提供了直观的命令行界面和全面的服务器管理功能。
+一个用于快速配置和管理 Linux 服务器的懒人Shell 脚本
 
 ### 快速开始
 ```bash
