@@ -340,22 +340,31 @@ check_fail2ban_installation() {
     # 检查是否安装
     if ! command -v fail2ban-client &> /dev/null; then
         echo -e "${RED}Fail2ban 未安装${NC}"
-        status=1
+        return 1
     fi
     
-    # 检查服务状态
+    # 检查服务状态并尝试启动
     if ! systemctl is-active --quiet fail2ban; then
-        echo -e "${YELLOW}Fail2ban 服务未运行${NC}"
-        status=2
+        echo -e "${YELLOW}Fail2ban 服务未运行，尝试启动...${NC}"
+        systemctl start fail2ban
+        sleep 2  # 等待服务启动
+        if ! systemctl is-active --quiet fail2ban; then
+            echo -e "${RED}Fail2ban 服务启动失败${NC}"
+            return 2
+        fi
     fi
     
-    # 检查配置文件
+    # 检查配置文件并创建
     if [ ! -f "/etc/fail2ban/jail.local" ]; then
-        echo -e "${YELLOW}Fail2ban 配置文件未创建${NC}"
-        status=3
+        echo -e "${YELLOW}Fail2ban 配置文件未创建，正在创建默认配置...${NC}"
+        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+        if [ ! -f "/etc/fail2ban/jail.local" ]; then
+            echo -e "${RED}配置文件创建失败${NC}"
+            return 3
+        fi
     fi
     
-    return $status
+    return 0
 }
 
 # 安装 Fail2ban
@@ -398,50 +407,78 @@ install_fail2ban() {
 
 # 配置 Fail2ban
 configure_fail2ban_ssh() {
-    # 检查安装状态
+    # 检查安装状态并自动修复
     check_fail2ban_installation
     local check_status=$?
     
-    if [ $check_status -eq 1 ]; then
-        read -p "Fail2ban 未安装，是否现在安装？(y/n): " install_choice
-        if [[ "$install_choice" =~ ^[Yy]$ ]]; then
-            install_fail2ban
-        else
-            return 1
+    case $check_status in
+        1)
+            read -p "Fail2ban 未安装，是否现在安装？(y/n): " install_choice
+            if [[ "$install_choice" =~ ^[Yy]$ ]]; then
+                install_fail2ban
+            else
+                return 1
+            fi
+            ;;
+        2)
+            read -p "是否尝试重新启动 Fail2ban 服务？(y/n): " restart_choice
+            if [[ "$restart_choice" =~ ^[Yy]$ ]]; then
+                systemctl restart fail2ban
+                sleep 2
+                if ! systemctl is-active --quiet fail2ban; then
+                    echo -e "${RED}服务启动失败，请检查系统日志${NC}"
+                    return 1
+                fi
+            else
+                return 1
+            fi
+            ;;
+        3)
+            read -p "是否创建默认配置文件？(y/n): " config_choice
+            if [[ "$config_choice" =~ ^[Yy]$ ]]; then
+                cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+                if [ ! -f "/etc/fail2ban/jail.local" ]; then
+                    echo -e "${RED}配置文件创建失败${NC}"
+                    return 1
+                fi
+            else
+                return 1
+            fi
+            ;;
+    esac
+
+    # 如果前面的检查和修复都成功了，继续配置
+    if [ $check_status -eq 0 ] || [ -f "/etc/fail2ban/jail.local" ]; then
+        echo -e "\n${BLUE}配置 Fail2ban SSH 防护${NC}"
+        
+        # 验证输入
+        while true; do
+            read -p "请输入最大尝试次数 [3-10]: " maxretry
+            if [[ "$maxretry" =~ ^[0-9]+$ ]] && [ "$maxretry" -ge 3 ] && [ "$maxretry" -le 10 ]; then
+                break
+            fi
+            echo -e "${RED}无效的输入，请输入3-10之间的数字${NC}"
+        done
+        
+        while true; do
+            read -p "请输入封禁时间(秒，-1为永久) [600-86400 或 -1]: " bantime
+            if [[ "$bantime" == "-1" ]] || ([[ "$bantime" =~ ^[0-9]+$ ]] && [ "$bantime" -ge 600 ] && [ "$bantime" -le 86400 ]); then
+                break
+            fi
+            echo -e "${RED}无效的输入，请输入600-86400之间的数字或-1${NC}"
+        done
+        
+        # 获取 SSH 端口
+        local port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
+        port=${port:-22}  # 默认使用 22 端口
+        
+        # 备份现有配置
+        if [ -f "/etc/fail2ban/jail.local" ]; then
+            cp /etc/fail2ban/jail.local "/etc/fail2ban/jail.local.backup_$(date +%Y%m%d%H%M%S)"
         fi
-    fi
-    
-    # 配置参数
-    echo -e "\n${BLUE}配置 Fail2ban SSH 防护${NC}"
-    
-    # 验证输入
-    while true; do
-        read -p "请输入最大尝试次数 [3-10]: " maxretry
-        if [[ "$maxretry" =~ ^[0-9]+$ ]] && [ "$maxretry" -ge 3 ] && [ "$maxretry" -le 10 ]; then
-            break
-        fi
-        echo -e "${RED}无效的输入，请输入3-10之间的数字${NC}"
-    done
-    
-    while true; do
-        read -p "请输入封禁时间(秒，-1为永久) [600-86400 或 -1]: " bantime
-        if [[ "$bantime" == "-1" ]] || ([[ "$bantime" =~ ^[0-9]+$ ]] && [ "$bantime" -ge 600 ] && [ "$bantime" -le 86400 ]); then
-            break
-        fi
-        echo -e "${RED}无效的输入，请输入600-86400之间的数字或-1${NC}"
-    done
-    
-    # 获取 SSH 端口
-    local port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
-    port=${port:-22}  # 默认使用 22 端口
-    
-    # 备份现有配置
-    if [ -f "/etc/fail2ban/jail.local" ]; then
-        cp /etc/fail2ban/jail.local "/etc/fail2ban/jail.local.backup_$(date +%Y%m%d%H%M%S)"
-    fi
-    
-    # 生成新配置
-    cat > /etc/fail2ban/jail.local << EOF
+        
+        # 生成新配置
+        cat > /etc/fail2ban/jail.local << EOF
 [DEFAULT]
 bantime = $bantime
 findtime = 600
@@ -458,13 +495,14 @@ maxretry = $maxretry
 bantime = $bantime
 findtime = 600
 EOF
-    
-    # 重启服务并验证
-    if systemctl restart fail2ban; then
-        echo -e "\n${GREEN}Fail2ban 配置已更新，当前状态：${NC}"
-        fail2ban-client status sshd
-    else
-        error_exit "Fail2ban 服务重启失败"
+        
+        # 重启服务并验证
+        if systemctl restart fail2ban; then
+            echo -e "\n${GREEN}Fail2ban 配置已更新，当前状态：${NC}"
+            fail2ban-client status sshd
+        else
+            error_exit "Fail2ban 服务重启失败"
+        fi
     fi
 }
 
