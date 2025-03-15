@@ -4,7 +4,8 @@ wget -P /root -N --no-check-certificate https://raw.githubusercontent.com/li88ii
 ```
 
 ### 主要功能
-![图片](https://github.com/user-attachments/assets/66bedcec-e8a5-4226-a47a-65183778c472)
+![image](https://github.com/user-attachments/assets/b5a7fef8-0cf0-49e5-b297-f10126c1440b)
+
 
 
 1. **系统更新与工具安装**：
