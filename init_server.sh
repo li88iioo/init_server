@@ -10,7 +10,23 @@ NC='\033[0m'
 
 # 分隔线
 show_separator() {
-    echo -e "${BLUE}------------------------------------${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+# 添加新的样式函数
+show_header() {
+    local title="$1"
+    echo -e "\n${BLUE}┏━━━━━━━━━ ${BOLD}$title${NC}${BLUE} ━━━━━━━━━┓${NC}"
+}
+
+show_footer() {
+    echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}\n"
+}
+
+show_menu_item() {
+    local number="$1"
+    local text="$2"
+    echo -e "${BLUE}┃${NC} ${YELLOW}${number}${NC}. ${GREEN}${text}${NC}"
 }
 
 # 错误处理更严格
@@ -604,68 +620,79 @@ open_docker_port() {
 
 # Docker 容器信息展示函数
 show_docker_container_info() {
-    echo -e "${BLUE}======= Docker 容器资源信息 ========${NC}"
+    clear_screen
+    show_header "Docker 容器资源信息"
     
     # 检查是否安装了 Docker
     if ! command -v docker &> /dev/null; then
-        echo -e "${RED}Docker 未安装，无法显示容器信息${NC}"
+        echo -e "${BLUE}┃${NC} ${RED}Docker 未安装，无法显示容器信息${NC}"
+        show_footer
         return
     fi
 
     # 检查 Docker 服务是否正常运行
     if ! docker info &> /dev/null; then
-        echo -e "${RED}Docker 服务未正常运行${NC}"
+        echo -e "${BLUE}┃${NC} ${RED}Docker 服务未正常运行${NC}"
+        show_footer
         return 1
     fi
 
-    # 显示容器列表和网络信息
-    echo -e "\n${YELLOW}容器列表：${NC}"
-    docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Networks}}"
+    # 显示容器列表
+    echo -e "${BLUE}┃${NC} ${BOLD}容器列表${NC}"
+    echo -e "${BLUE}┃${NC}"
+    docker ps -a --format "table ${BLUE}┃${NC} {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Networks}}"
     
     # 获取所有容器ID
     container_ids=$(docker ps -aq)
-
-    # 显示详细容器信息和资源使用情况
-    echo -e "\n${YELLOW}详细容器信息和资源使用：${NC}"
     
-    for container_id in $container_ids; do
-        # 获取容器基本信息
-        container_info=$(docker inspect --format "\
-容器名称: {{.Name}}
-容器ID: {{.Id}}
-镜像: {{.Config.Image}}
-启动时间: {{.Created}}
-状态: {{.State.Status}}
-网络: {{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}" "$container_id")
-
-        # 获取容器资源使用情况
-        resource_info=$(docker stats "$container_id" --no-stream --format "\
-CPU 使用率: {{.CPUPerc}}
-内存使用: {{.MemUsage}}
-网络 I/O: {{.NetIO}}
-块 I/O: {{.BlockIO}}")
-
-        # 网关信息
-        network_name=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' "$container_id")
-        gateway=$(docker network inspect "$network_name" 2>/dev/null | grep -m 1 "Gateway" | awk -F'"' '{print $4}')
-
-        # 输出信息
-        echo -e "${GREEN}$container_info${NC}"
-        echo -e "${YELLOW}资源使用情况：${NC}"
-        echo -e "${GREEN}$resource_info${NC}"
-        
-        if [[ -n "$gateway" ]]; then
-            echo -e "${GREEN}网关: $gateway${NC}"
-        else
-            echo -e "${RED}未找到网关${NC}"
-        fi
-        
-        echo -e "${BLUE}===========================${NC}"
-    done
+    if [ -n "$container_ids" ]; then
+        for container_id in $container_ids; do
+            echo -e "${BLUE}┃${NC}"
+            echo -e "${BLUE}┣━━ ${YELLOW}容器详细信息${NC}"
+            
+            # 容器基本信息
+            container_info=$(docker inspect --format "\
+${BLUE}┃${NC}  ${GREEN}容器名称:${NC} {{.Name}}
+${BLUE}┃${NC}  ${GREEN}容器ID:${NC} {{.Id}}
+${BLUE}┃${NC}  ${GREEN}镜像:${NC} {{.Config.Image}}
+${BLUE}┃${NC}  ${GREEN}启动时间:${NC} {{.Created}}
+${BLUE}┃${NC}  ${GREEN}状态:${NC} {{.State.Status}}
+${BLUE}┃${NC}  ${GREEN}网络:${NC} {{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}" "$container_id")
+            echo -e "$container_info"
+            
+            echo -e "${BLUE}┃${NC}"
+            echo -e "${BLUE}┣━━ ${YELLOW}资源使用情况${NC}"
+            
+            # 资源使用情况
+            resource_info=$(docker stats "$container_id" --no-stream --format "\
+${BLUE}┃${NC}  ${GREEN}CPU 使用率:${NC} {{.CPUPerc}}
+${BLUE}┃${NC}  ${GREEN}内存使用:${NC} {{.MemUsage}}
+${BLUE}┃${NC}  ${GREEN}网络 I/O:${NC} {{.NetIO}}
+${BLUE}┃${NC}  ${GREEN}块 I/O:${NC} {{.BlockIO}}")
+            echo -e "$resource_info"
+            
+            # 网关信息
+            network_name=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' "$container_id")
+            gateway=$(docker network inspect "$network_name" 2>/dev/null | grep -m 1 "Gateway" | awk -F'"' '{print $4}')
+            
+            if [[ -n "$gateway" ]]; then
+                echo -e "${BLUE}┃${NC}  ${GREEN}网关:${NC} $gateway"
+            fi
+            
+            echo -e "${BLUE}┃${NC}"
+            echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        done
+    else
+        echo -e "${BLUE}┃${NC} ${YELLOW}当前没有运行的容器${NC}"
+    fi
     
-    # 显示总体 Docker 资源使用情况
-    echo -e "\n${YELLOW}Docker 总体资源使用情况：${NC}"
-    docker system df
+    # 显示总体资源使用情况
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${YELLOW}Docker 总体资源使用情况${NC}"
+    echo -e "${BLUE}┃${NC}"
+    docker system df | sed "s/^/${BLUE}┃${NC} /"
+    
+    show_footer
 }
 
 # 删除未使用的 Docker 资源
@@ -719,54 +746,66 @@ clean_docker_resources() {
 
 # 显示 Docker 网络详细信息
 show_docker_networks() {
-    echo -e "${BLUE}======= Docker 网络详细信息 ========${NC}"
+    clear_screen
+    show_header "Docker 网络详细信息"
     
     # 检查 Docker 是否可用
     if ! command -v docker &> /dev/null; then
-        echo -e "${RED}Docker 未安装，无法显示网络信息${NC}"
+        echo -e "${BLUE}┃${NC} ${RED}Docker 未安装，无法显示网络信息${NC}"
+        show_footer
         return 1
     fi
 
     # 列出所有网络
-    echo -e "${YELLOW}Docker 网络列表：${NC}"
-    docker network ls
-
+    echo -e "${BLUE}┃${NC} ${BOLD}网络列表${NC}"
+    echo -e "${BLUE}┃${NC}"
+    docker network ls | sed "s/^/${BLUE}┃${NC} /"
+    
     # 显示每个网络的详细信息
     networks=$(docker network ls -q)
     
-    for network in $networks; do
-        echo -e "\n${GREEN}网络详细信息：${NC}"
-        
-        # 网络基本信息
-        network_name=$(docker network inspect "$network" -f '{{.Name}}')
-        network_driver=$(docker network inspect "$network" -f '{{.Driver}}')
-        network_scope=$(docker network inspect "$network" -f '{{.Scope}}')
-        
-        echo -e "${YELLOW}网络名称:${NC} $network_name"
-        echo -e "${YELLOW}网络驱动:${NC} $network_driver"
-        echo -e "${YELLOW}网络范围:${NC} $network_scope"
-
-        # 网络 IPAM 配置
-        subnet=$(docker network inspect "$network" -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
-        gateway=$(docker network inspect "$network" -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
-        
-        echo -e "${YELLOW}子网:${NC} $subnet"
-        echo -e "${YELLOW}网关:${NC} $gateway"
-
-        # 连接到此网络的容器
-        echo -e "${YELLOW}连接的容器：${NC}"
-        containers=$(docker network inspect "$network" -f '{{range .Containers}}{{.Name}} {{end}}')
-        
-        if [[ -n "$containers" ]]; then
-            for container in $containers; do
-                echo -e "  - ${GREEN}$container${NC}"
-            done
-        else
-            echo -e "  ${RED}无容器连接到此网络${NC}"
-        fi
-
-        echo -e "${BLUE}===========================${NC}"
-    done
+    if [ -n "$networks" ]; then
+        for network in $networks; do
+            echo -e "${BLUE}┃${NC}"
+            echo -e "${BLUE}┣━━ ${YELLOW}网络详细信息${NC}"
+            
+            # 网络基本信息
+            network_name=$(docker network inspect "$network" -f '{{.Name}}')
+            network_driver=$(docker network inspect "$network" -f '{{.Driver}}')
+            network_scope=$(docker network inspect "$network" -f '{{.Scope}}')
+            
+            echo -e "${BLUE}┃${NC}  ${GREEN}网络名称:${NC} $network_name"
+            echo -e "${BLUE}┃${NC}  ${GREEN}网络驱动:${NC} $network_driver"
+            echo -e "${BLUE}┃${NC}  ${GREEN}网络范围:${NC} $network_scope"
+            
+            # IPAM配置
+            subnet=$(docker network inspect "$network" -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+            gateway=$(docker network inspect "$network" -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+            
+            echo -e "${BLUE}┃${NC}  ${GREEN}子网:${NC} $subnet"
+            echo -e "${BLUE}┃${NC}  ${GREEN}网关:${NC} $gateway"
+            
+            # 连接的容器
+            echo -e "${BLUE}┃${NC}"
+            echo -e "${BLUE}┣━━ ${YELLOW}已连接容器${NC}"
+            containers=$(docker network inspect "$network" -f '{{range .Containers}}{{.Name}} {{end}}')
+            
+            if [[ -n "$containers" ]]; then
+                for container in $containers; do
+                    echo -e "${BLUE}┃${NC}  • ${GREEN}$container${NC}"
+                done
+            else
+                echo -e "${BLUE}┃${NC}  ${RED}无容器连接到此网络${NC}"
+            fi
+            
+            echo -e "${BLUE}┃${NC}"
+            echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        done
+    else
+        echo -e "${BLUE}┃${NC} ${YELLOW}未找到任何 Docker 网络${NC}"
+    fi
+    
+    show_footer
 }
 
 # 7. 1Panel安装
@@ -787,43 +826,63 @@ install_v2ray_agent() {
 
 # 9.系统安全检查函数
 system_security_check() {
-    echo -e "${BLUE}===== 系统安全全面检查 =====${NC}"
+    clear_screen
+    show_header "系统安全检查"
     
-    # 检查系统基本安全状态
-    echo -e "${YELLOW}1. 系统基本信息：${NC}"
-    uname -a
+    # 系统基本信息
+    echo -e "${BLUE}┃${NC} ${BOLD}1. 系统基本信息${NC}"
+    echo -e "${BLUE}┃${NC}"
+    uname -a | sed "s/^/${BLUE}┃${NC} /"
     
-    # 检查当前登录用户
-    echo -e "\n${YELLOW}2. 当前登录用户：${NC}"
-    whoami
+    # 当前登录用户
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}2. 当前登录用户${NC}"
+    echo -e "${BLUE}┃${NC}"
+    whoami | sed "s/^/${BLUE}┃${NC} /"
     
-    # 检查开放端口
-    echo -e "\n${YELLOW}3. 开放端口及监听服务：${NC}"
-    sudo netstat -tuln | grep -E ":22\s|:80\s|:443\s"
+    # 开放端口
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}3. 开放端口及监听服务${NC}"
+    echo -e "${BLUE}┃${NC}"
+    netstat -tuln | grep -E ":22\s|:80\s|:443\s" | sed "s/^/${BLUE}┃${NC} /"
     
-    # 检查系统更新情况
-    echo -e "\n${YELLOW}4. 系统更新状态：${NC}"
-    apt list --upgradable 2>/dev/null
+    # 系统更新
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}4. 系统更新状态${NC}"
+    echo -e "${BLUE}┃${NC}"
+    if command -v apt &> /dev/null; then
+        apt list --upgradable 2>/dev/null | head -n 5 | sed "s/^/${BLUE}┃${NC} /"
+    else
+        echo -e "${BLUE}┃${NC} ${YELLOW}不支持的包管理器${NC}"
+    fi
     
-    # 检查最近登录日志
-    echo -e "\n${YELLOW}5. 最近登录记录：${NC}"
-    last -a | head -n 10
+    # 登录记录
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}5. 最近登录记录${NC}"
+    echo -e "${BLUE}┃${NC}"
+    last -a | head -n 5 | sed "s/^/${BLUE}┃${NC} /"
     
-    # 检查 SSH 配置安全性
-    echo -e "\n${YELLOW}6. SSH 安全配置检查：${NC}"
-    sudo sshd -T | grep -E "permituserenvironment|permitrootlogin|passwordauthentication"
+    # SSH配置
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}6. SSH 安全配置${NC}"
+    echo -e "${BLUE}┃${NC}"
+    if [ -f /etc/ssh/sshd_config ]; then
+        sshd -T 2>/dev/null | grep -E "permituserenvironment|permitrootlogin|passwordauthentication" | sed "s/^/${BLUE}┃${NC} /"
+    else
+        echo -e "${BLUE}┃${NC} ${RED}SSH 配置文件不存在${NC}"
+    fi
     
-    # 检查防火墙状态
-    echo -e "\n${YELLOW}7. 防火墙状态：${NC}"
-    sudo ufw status
+    # 防火墙状态
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}7. 防火墙状态${NC}"
+    echo -e "${BLUE}┃${NC}"
+    if command -v ufw &> /dev/null; then
+        ufw status | sed "s/^/${BLUE}┃${NC} /"
+    else
+        echo -e "${BLUE}┃${NC} ${YELLOW}UFW 未安装${NC}"
+    fi
     
-    # 检查进程
-    echo -e "\n${YELLOW}8. 异常进程检查：${NC}"
-    ps aux | grep -E ":[0-9]+ \?|defunc"
-    
-    # 检查系统日志中的错误和警告
-    echo -e "\n${YELLOW}9. 系统日志安全摘要：${NC}"
-    sudo journalctl -p err -n 10
+    show_footer
 }
 
 # 10. 系统安全加固前的确认函数
@@ -874,49 +933,82 @@ EOF'
 
 # 11. 资源监控函数
 system_resource_monitor() {
-    echo -e "${YELLOW}系统资源监控${NC}"
+    clear_screen
+    show_header "系统资源监控"
     
     # CPU信息
-    echo -e "\nCPU信息:"
-    lscpu | grep -E "Model name|Socket|Core|Thread"
+    echo -e "${BLUE}┃${NC} ${BOLD}CPU 信息${NC}"
+    echo -e "${BLUE}┃${NC}"
+    lscpu | grep -E "Model name|Socket|Core|Thread" | sed "s/^/${BLUE}┃${NC} /"
     
     # 内存使用
-    echo -e "\n内存使用:"
-    free -h
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}内存使用情况${NC}"
+    echo -e "${BLUE}┃${NC}"
+    free -h | sed "s/^/${BLUE}┃${NC} /"
     
     # 磁盘使用
-    echo -e "\n磁盘使用:"
-    df -h
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}磁盘使用情况${NC}"
+    echo -e "${BLUE}┃${NC}"
+    df -h | sed "s/^/${BLUE}┃${NC} /"
+    
+    # CPU负载
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}CPU 负载${NC}"
+    echo -e "${BLUE}┃${NC}"
+    uptime | sed "s/^/${BLUE}┃${NC} /"
+    
+    show_footer
 }
 
 # 12. 网络诊断函数
 network_diagnostic() {
-    echo -e "${YELLOW}网络诊断${NC}"
+    clear_screen
+    show_header "网络诊断"
     
-    # 测试公网连接
-    echo "公网连接测试:"
-    ping -c 4 8.8.8.8
+    # 公网连接测试
+    echo -e "${BLUE}┃${NC} ${BOLD}公网连接测试${NC}"
+    echo -e "${BLUE}┃${NC}"
+    ping -c 4 8.8.8.8 | sed "s/^/${BLUE}┃${NC} /"
     
     # DNS解析测试
-    echo -e "\nDNS解析测试:"
-    dig google.com
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}DNS 解析测试${NC}"
+    echo -e "${BLUE}┃${NC}"
+    dig google.com +short | sed "s/^/${BLUE}┃${NC} /"
     
     # 路由追踪
-    echo -e "\n路由追踪:"
-    traceroute google.com
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}路由追踪${NC}"
+    echo -e "${BLUE}┃${NC}"
+    traceroute -n google.com | head -n 5 | sed "s/^/${BLUE}┃${NC} /"
+    
+    # 网络接口
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}网络接口信息${NC}"
+    echo -e "${BLUE}┃${NC}"
+    ip addr | grep -E "^[0-9]:|inet" | sed "s/^/${BLUE}┃${NC} /"
+    
+    show_footer
 }
 
-# 子菜单 - SSH配置
+# SSH配置子菜单
 ssh_menu() {
     while true; do
-        echo -e "${BLUE}========= SSH配置菜单 ==========${NC}"
-        echo -e "${YELLOW}1. 修改SSH端口${NC}"
-        echo -e "${YELLOW}2. 查看当前SSH端口${NC}"
-        echo -e "${YELLOW}3. 配置SSH密钥认证${NC}"
-        echo -e "${GREEN}0. 返回主菜单${NC}"
-        echo -e "${BLUE}================================${NC}"
+        clear_screen
+        show_header "SSH 配置管理"
         
-        read -p "请选择操作: " choice
+        show_menu_item "1" "修改SSH端口"
+        show_menu_item "2" "查看当前SSH端口"
+        show_menu_item "3" "配置SSH密钥认证"
+        
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "0" "返回主菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-3]: "${NC})" choice
         case $choice in
             1) modify_ssh_port ;;
             2) check_ssh_port ;;
@@ -924,22 +1016,27 @@ ssh_menu() {
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
-        read -p "按回车键继续..."
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
     done
 }
 
-# 子菜单 - UFW配置
+# UFW配置子菜单
 ufw_menu() {
     while true; do
-        echo -e "${BLUE}========= UFW配置菜单 ==========${NC}"
-        echo -e "${YELLOW}1. 安装UFW${NC}"
-        echo -e "${YELLOW}2. 配置UFW并开放SSH端口${NC}"
-        echo -e "${YELLOW}3. 配置UFW PING规则${NC}"
-        echo -e "${YELLOW}4. 查看UFW状态${NC}"
-        echo -e "${GREEN}0. 返回主菜单${NC}"
-        echo -e "${BLUE}================================${NC}"
+        clear_screen
+        show_header "UFW 防火墙配置"
         
-        read -p "请选择操作: " choice
+        show_menu_item "1" "安装UFW"
+        show_menu_item "2" "配置UFW并开放SSH端口"
+        show_menu_item "3" "配置UFW PING规则"
+        show_menu_item "4" "查看UFW状态"
+        
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "0" "返回主菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-4]: "${NC})" choice
         case $choice in
             1) install_ufw ;;
             2) configure_ufw ;;
@@ -948,21 +1045,26 @@ ufw_menu() {
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
-        read -p "按回车键继续..."
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
     done
 }
 
-# 子菜单 - Fail2ban配置
+# Fail2ban配置子菜单
 fail2ban_menu() {
     while true; do
-        echo -e "${BLUE}======== Fail2ban配置菜单 ========${NC}"
-        echo -e "${YELLOW}1. 安装Fail2ban${NC}"
-        echo -e "${YELLOW}2. 配置Fail2ban SSH防护${NC}"
-        echo -e "${YELLOW}3. 查看Fail2ban状态${NC}"
-        echo -e "${GREEN}0. 返回主菜单${NC}"
-        echo -e "${BLUE}================================${NC}"
+        clear_screen
+        show_header "Fail2ban 配置管理"
         
-        read -p "请选择操作: " choice
+        show_menu_item "1" "安装Fail2ban"
+        show_menu_item "2" "配置Fail2ban SSH防护"
+        show_menu_item "3" "查看Fail2ban状态"
+        
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "0" "返回主菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-3]: "${NC})" choice
         case $choice in
             1) install_fail2ban ;;
             2) configure_fail2ban_ssh ;;
@@ -970,21 +1072,26 @@ fail2ban_menu() {
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
-        read -p "按回车键继续..."
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
     done
 }
 
-# 子菜单 - ZeroTier配置
+# ZeroTier配置子菜单
 zerotier_menu() {
     while true; do
-        echo -e "${BLUE}======= ZeroTier配置菜单 ========${NC}"
-        echo -e "${YELLOW}1. 安装并加入网络${NC}"
-        echo -e "${YELLOW}2. 查看ZeroTier状态${NC}"
-        echo -e "${YELLOW}3. 配置ZeroTier SSH访问${NC}"
-        echo -e "${GREEN}0. 返回主菜单${NC}"
-        echo -e "${BLUE}================================${NC}"
+        clear_screen
+        show_header "ZeroTier 配置管理"
         
-        read -p "请选择操作: " choice
+        show_menu_item "1" "安装并加入网络"
+        show_menu_item "2" "查看ZeroTier状态"
+        show_menu_item "3" "配置ZeroTier SSH访问"
+        
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "0" "返回主菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-3]: "${NC})" choice
         case $choice in
             1) install_zerotier ;;
             2) check_zerotier_status ;;
@@ -992,26 +1099,35 @@ zerotier_menu() {
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
-        read -p "按回车键继续..."
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
     done
 }
 
-# Docker 子菜单
+# Docker配置子菜单
 docker_menu() {
     while true; do
-        echo -e "${BLUE}======= Docker 配置菜单 ========${NC}"
-        echo -e "${YELLOW}1. 安装 Docker${NC}"
-        echo -e "${YELLOW}2. 安装 Docker Compose${NC}"
-        echo -e "${YELLOW}3. 配置 UFW Docker 规则${NC}"
-        echo -e "${YELLOW}4. 开放 Docker 端口（配置完docker ufw生效）${NC}"
-        echo -e "${YELLOW}5. 查看 Docker 容器信息${NC}"
-        echo -e "${YELLOW}6. 清理 Docker 资源${NC}"
-        echo -e "${YELLOW}7. 查看 Docker 网络信息${NC}"
+        clear_screen
+        show_header "Docker 配置管理"
         
-        echo -e "${GREEN}0. 返回主菜单${NC}"
-        echo -e "${BLUE}================================${NC}"
+        echo -e "${BLUE}┃${NC} ${BOLD}基础配置${NC}"
+        show_menu_item "1" "安装 Docker"
+        show_menu_item "2" "安装 Docker Compose"
         
-        read -p "请选择操作: " choice
+        echo -e "\n${BLUE}┃${NC} ${BOLD}网络配置${NC}"
+        show_menu_item "3" "配置 UFW Docker 规则"
+        show_menu_item "4" "开放 Docker 端口"
+        
+        echo -e "\n${BLUE}┃${NC} ${BOLD}系统管理${NC}"
+        show_menu_item "5" "查看 Docker 容器信息"
+        show_menu_item "6" "清理 Docker 资源"
+        show_menu_item "7" "查看 Docker 网络信息"
+        
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "0" "返回主菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-7]: "${NC})" choice
         case $choice in
             1) install_docker ;;
             2) install_docker_compose ;;
@@ -1023,7 +1139,7 @@ docker_menu() {
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
-        read -p "按回车键继续..."
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
     done
 }
 
@@ -1036,25 +1152,36 @@ clear_screen() {
 main_menu() {
     while true; do
         clear_screen
-        echo -e "${BLUE}${BOLD}===== 服务器简单 安全 配置菜单 =====${NC}"
-        echo -e "${GREEN}${BOLD}01. 更新系统${NC}"
-        echo -e "${GREEN}${BOLD}02. SSH端口配置${NC}"
-        echo -e "${GREEN}${BOLD}03. UFW防火墙配置${NC}"
-        echo -e "${GREEN}${BOLD}04. Fail2ban配置${NC}"
-        echo -e "${GREEN}${BOLD}05. ZeroTier配置${NC}"
-        echo -e "${GREEN}${BOLD}06. Docker配置${NC}"  
-        show_separator
-        echo -e "${GREEN}${BOLD}07. 安装1Panel${NC}"
-        echo -e "${GREEN}${BOLD}08. 安装v2ray-agent${NC}"
-        show_separator
-        echo -e "${GREEN}${BOLD}09. 系统安全检查${NC}"
-        echo -e "${GREEN}${BOLD}10. 系统安全加固${NC}"
-        echo -e "${GREEN}${BOLD}11. 系统资源监控${NC}"
-        echo -e "${GREEN}${BOLD}12. 网络诊断${NC}"
-        echo -e "${RED}${BOLD}0. 退出${NC}"
-        echo -e "${BLUE}${BOLD}====================================${NC}"
+        show_header "服务器配置管理系统"
         
-        read -p "请选择操作 1-12 : " choice
+        # 系统管理
+        echo -e "${BLUE}┃${NC} ${BOLD}系统管理${NC}"
+        show_menu_item "01" "更新系统"
+        show_menu_item "02" "SSH端口配置"
+        show_menu_item "03" "UFW防火墙配置"
+        show_menu_item "04" "Fail2ban配置"
+        show_menu_item "05" "ZeroTier配置"
+        show_menu_item "06" "Docker配置"
+        
+        # 应用安装
+        echo -e "\n${BLUE}┃${NC} ${BOLD}应用安装${NC}"
+        show_menu_item "07" "安装1Panel"
+        show_menu_item "08" "安装v2ray-agent"
+        
+        # 系统工具
+        echo -e "\n${BLUE}┃${NC} ${BOLD}系统工具${NC}"
+        show_menu_item "09" "系统安全检查"
+        show_menu_item "10" "系统安全加固"
+        show_menu_item "11" "系统资源监控"
+        show_menu_item "12" "网络诊断"
+        
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "0" "退出系统"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-12]: "${NC})" choice
+        
         case $choice in
             1) system_update ;;
             2) ssh_menu ;;
@@ -1068,10 +1195,14 @@ main_menu() {
             10) system_security_hardening ;;
             11) system_resource_monitor ;;
             12) network_diagnostic ;;
-            0) exit 0 ;;
-            *) echo -e "${RED}无效的选择${NC}" ;;
+            0) 
+                clear_screen
+                echo -e "${GREEN}感谢使用，再见！${NC}"
+                exit 0 
+                ;;
+            *) echo -e "${RED}无效的选择，请重试${NC}" ;;
         esac
-        [ "$choice" != "0" ] && read -p "按回车键继续..."
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
     done
 }
 
