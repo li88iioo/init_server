@@ -963,7 +963,158 @@ show_docker_networks() {
     show_footer
 }
 
-# 7. 1Panel安装
+# 8. Swap 配置函数
+configure_swap() {
+    clear_screen
+    show_header "Swap 配置管理"
+    
+    # 显示当前 Swap 状态
+    echo -e "${BLUE}┃${NC} ${BOLD}当前 Swap 状态：${NC}"
+    echo -e "${BLUE}┃${NC}"
+    while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done < <(free -h | grep -i swap)
+    
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}Swap 文件信息：${NC}"
+    echo -e "${BLUE}┃${NC}"
+    if [ -f /swapfile ]; then
+        while IFS= read -r line; do
+            echo -e "${BLUE}┃${NC} $line"
+        done < <(ls -lh /swapfile)
+    else
+        echo -e "${BLUE}┃${NC} ${YELLOW}未检测到 Swap 文件${NC}"
+    fi
+    
+    echo -e "${BLUE}┃${NC}"
+    show_menu_item "1" "创建/调整 Swap"
+    show_menu_item "2" "删除 Swap"
+    show_menu_item "3" "调整 Swappiness"
+    echo -e "${BLUE}┃${NC}"
+    show_menu_item "0" "返回主菜单"
+    
+    show_footer
+    
+    read -p "$(echo -e ${YELLOW}"请选择操作 [0-3]: "${NC})" choice
+    
+    case $choice in
+        1) create_swap ;;
+        2) remove_swap ;;
+        3) adjust_swappiness ;;
+        0) return ;;
+        *) echo -e "${RED}无效的选择${NC}" ;;
+    esac
+}
+
+# 创建或调整 Swap
+create_swap() {
+    # 检查是否已存在 swap 文件
+    if [ -f /swapfile ]; then
+        echo -e "${YELLOW}检测到已存在 Swap 文件${NC}"
+        read -p "是否要调整大小？(y/n): " adjust
+        if [[ "$adjust" =~ ^[Yy]$ ]]; then
+            swapoff /swapfile || error_exit "无法关闭现有 Swap"
+        else
+            return
+        fi
+    fi
+    
+    # 获取系统内存大小（以 GB 为单位）
+    local mem_total=$(free -g | awk '/^Mem:/{print $2}')
+    
+    echo -e "\n${BLUE}推荐 Swap 大小：${NC}"
+    echo "1) 内存小于 2GB：建议设置为内存的 2 倍"
+    echo "2) 内存 2-8GB：建议设置为内存大小"
+    echo "3) 内存大于 8GB：建议设置为 8GB 或根据需求调整"
+    
+    while true; do
+        read -p "请输入要创建的 Swap 大小(GB): " swap_size
+        if [[ "$swap_size" =~ ^[0-9]+$ ]] && [ "$swap_size" -gt 0 ]; then
+            break
+        fi
+        echo -e "${RED}请输入有效的数字${NC}"
+    done
+    
+    echo -e "${YELLOW}正在创建 Swap 文件，请稍候...${NC}"
+    
+    # 创建 swap 文件
+    dd if=/dev/zero of=/swapfile bs=1G count=$swap_size status=progress || error_exit "Swap 文件创建失败"
+    
+    # 设置权限
+    chmod 600 /swapfile || error_exit "无法设置 Swap 文件权限"
+    
+    # 格式化为 swap
+    mkswap /swapfile || error_exit "Swap 格式化失败"
+    
+    # 启用 swap
+    swapon /swapfile || error_exit "Swap 启用失败"
+    
+    # 添加到 fstab
+    if ! grep -q "/swapfile" /etc/fstab; then
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+    fi
+    
+    echo -e "${GREEN}Swap 创建完成！当前状态：${NC}"
+    free -h | grep -i swap
+}
+
+# 删除 Swap
+remove_swap() {
+    if [ ! -f /swapfile ]; then
+        echo -e "${RED}未检测到 Swap 文件${NC}"
+        return
+    fi
+    
+    read -p "确定要删除 Swap 吗？(yes/no): " confirm
+    if [ "$confirm" != "yes" ]; then
+        echo -e "${YELLOW}操作已取消${NC}"
+        return
+    fi
+    
+    # 关闭 swap
+    swapoff /swapfile || error_exit "无法关闭 Swap"
+    
+    # 从 fstab 中删除
+    sed -i '/\/swapfile/d' /etc/fstab
+    
+    # 删除文件
+    rm -f /swapfile
+    
+    echo -e "${GREEN}Swap 已成功删除${NC}"
+}
+
+# 调整 Swappiness
+adjust_swappiness() {
+    local current_swappiness=$(cat /proc/sys/vm/swappiness)
+    
+    echo -e "${BLUE}当前 swappiness 值：${NC}$current_swappiness"
+    echo -e "${YELLOW}推荐值：${NC}"
+    echo "10-20: 桌面环境"
+    echo "1-10: 服务器环境"
+    echo "0: 仅在绝对必要时使用 swap"
+    
+    while true; do
+        read -p "请输入新的 swappiness 值(0-100): " new_swappiness
+        if [[ "$new_swappiness" =~ ^[0-9]+$ ]] && [ "$new_swappiness" -ge 0 ] && [ "$new_swappiness" -le 100 ]; then
+            break
+        fi
+        echo -e "${RED}请输入0-100之间的数字${NC}"
+    done
+    
+    # 立即生效
+    sysctl vm.swappiness=$new_swappiness
+    
+    # 永久生效
+    if ! grep -q "vm.swappiness" /etc/sysctl.conf; then
+        echo "vm.swappiness=$new_swappiness" >> /etc/sysctl.conf
+    else
+        sed -i "s/vm.swappiness=.*/vm.swappiness=$new_swappiness/" /etc/sysctl.conf
+    fi
+    
+    echo -e "${GREEN}Swappiness 已设置为 $new_swappiness${NC}"
+}
+
+# 8. 1Panel安装
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
     if [ "$answer" = "y" ]; then
@@ -971,7 +1122,7 @@ install_1panel() {
     fi
 }
 
-# 8. v2ray-agent安装
+# 9. v2ray-agent安装
 install_v2ray_agent() {
     read -p "是否安装v2ray-agent? (y/n): " answer
     if [ "$answer" = "y" ]; then
@@ -979,7 +1130,7 @@ install_v2ray_agent() {
     fi
 }
 
-# 9.系统安全检查函数
+# 10.系统安全检查函数
 system_security_check() {
     clear_screen
     show_header "系统安全检查"
@@ -1054,7 +1205,7 @@ system_security_check() {
     show_footer
 }
 
-# 10. 系统安全加固前的确认函数
+# 11. 系统安全加固前的确认函数
 system_security_hardening() {
     echo -e "${RED}警告：系统安全加固将对系统配置进行重大更改！${NC}"
     read -p "是否确定要进行系统安全加固？(yes/no): " confirm
@@ -1100,7 +1251,7 @@ EOF'
     fi
 }
 
-# 11. 资源监控函数
+# 12. 资源监控函数
 system_resource_monitor() {
     clear_screen
     show_header "系统资源监控"
@@ -1139,7 +1290,7 @@ system_resource_monitor() {
     show_footer
 }
 
-# 12. 网络诊断函数
+# 13. 网络诊断函数
 network_diagnostic() {
     clear_screen
     show_header "网络诊断"
@@ -1347,25 +1498,26 @@ main_menu() {
         show_menu_item "04" "Fail2ban配置"
         show_menu_item "05" "ZeroTier配置"
         show_menu_item "06" "Docker配置"
+        show_menu_item "07" "Swap配置"     # 新添加的选项
         
         # 应用安装
         echo -e "\n${BLUE}┃${NC} ${BOLD}应用安装${NC}"
-        show_menu_item "07" "安装1Panel"
-        show_menu_item "08" "安装v2ray-agent"
+        show_menu_item "08" "安装1Panel"
+        show_menu_item "09" "安装v2ray-agent"
         
         # 系统工具
         echo -e "\n${BLUE}┃${NC} ${BOLD}系统工具${NC}"
-        show_menu_item "09" "系统安全检查"
-        show_menu_item "10" "系统安全加固"
-        show_menu_item "11" "系统资源监控"
-        show_menu_item "12" "网络诊断"
+        show_menu_item "10" "系统安全检查"
+        show_menu_item "11" "系统安全加固"
+        show_menu_item "12" "系统资源监控"
+        show_menu_item "13" "网络诊断"
         
         echo -e "${BLUE}┃${NC}"
         show_menu_item "0" "退出系统"
         
         show_footer
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-12]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-13]: "${NC})" choice
         
         case $choice in
             1) system_update ;;
@@ -1374,12 +1526,13 @@ main_menu() {
             4) fail2ban_menu ;;
             5) zerotier_menu ;;
             6) docker_menu ;;
-            7) install_1panel ;;
-            8) install_v2ray_agent ;;
-            9) system_security_check ;;
-            10) system_security_hardening ;;
-            11) system_resource_monitor ;;
-            12) network_diagnostic ;;
+            7) configure_swap ;;    # 新添加的选项
+            8) install_1panel ;;
+            9) install_v2ray_agent ;;
+            10) system_security_check ;;
+            11) system_security_hardening ;;
+            12) system_resource_monitor ;;
+            13) network_diagnostic ;;
             0) 
                 clear_screen
                 echo -e "${GREEN}感谢使用，再见！${NC}"
@@ -1398,3 +1551,4 @@ fi
 
 # 运行主菜单
 main_menu
+
