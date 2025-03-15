@@ -1,4 +1,5 @@
-![image](https://github.com/user-attachments/assets/b5a7fef8-0cf0-49e5-b297-f10126c1440b)
+![image](https://github.com/user-attachments/assets/6077d526-4756-4ffb-a8c3-f06f29b1d75e)
+
 # 服务器配置管理系统
 
 一个用于快速配置和管理 Linux 服务器的懒人Shell 脚本
