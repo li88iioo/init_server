@@ -407,84 +407,69 @@ install_fail2ban() {
 
 # 配置 Fail2ban
 configure_fail2ban_ssh() {
-    # 检查安装状态并自动修复
-    check_fail2ban_installation
-    local check_status=$?
-    
-    case $check_status in
-        1)
-            read -p "Fail2ban 未安装，是否现在安装？(y/n): " install_choice
-            if [[ "$install_choice" =~ ^[Yy]$ ]]; then
-                install_fail2ban
-            else
-                return 1
-            fi
-            ;;
-        2)
-            read -p "是否尝试重新启动 Fail2ban 服务？(y/n): " restart_choice
-            if [[ "$restart_choice" =~ ^[Yy]$ ]]; then
-                systemctl restart fail2ban
-                sleep 2
-                if ! systemctl is-active --quiet fail2ban; then
-                    echo -e "${RED}服务启动失败，请检查系统日志${NC}"
-                    return 1
-                fi
-            else
-                return 1
-            fi
-            ;;
-        3)
-            read -p "是否创建默认配置文件？(y/n): " config_choice
-            if [[ "$config_choice" =~ ^[Yy]$ ]]; then
-                cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-                if [ ! -f "/etc/fail2ban/jail.local" ]; then
-                    echo -e "${RED}配置文件创建失败${NC}"
-                    return 1
-                fi
-            else
-                return 1
-            fi
-            ;;
-    esac
-
-    # 如果前面的检查和修复都成功了，继续配置
-    if [ $check_status -eq 0 ] || [ -f "/etc/fail2ban/jail.local" ]; then
-        echo -e "\n${BLUE}配置 Fail2ban SSH 防护${NC}"
+    # 首先确保服务正在运行
+    if ! systemctl is-active --quiet fail2ban; then
+        echo -e "${YELLOW}Fail2ban 服务未运行，正在启动...${NC}"
+        systemctl start fail2ban
+        sleep 3  # 增加等待时间
         
-        # 验证输入
-        while true; do
-            read -p "请输入最大尝试次数 [3-10]: " maxretry
-            if [[ "$maxretry" =~ ^[0-9]+$ ]] && [ "$maxretry" -ge 3 ] && [ "$maxretry" -le 10 ]; then
-                break
+        if ! systemctl is-active --quiet fail2ban; then
+            echo -e "${RED}Fail2ban 服务启动失败，尝试修复...${NC}"
+            
+            # 尝试修复服务
+            systemctl stop fail2ban
+            rm -f /var/run/fail2ban/fail2ban.sock 2>/dev/null
+            systemctl start fail2ban
+            sleep 3
+            
+            if ! systemctl is-active --quiet fail2ban; then
+                error_exit "无法启动 Fail2ban 服务，请检查系统日志: journalctl -u fail2ban"
             fi
-            echo -e "${RED}无效的输入，请输入3-10之间的数字${NC}"
-        done
-        
-        while true; do
-            read -p "请输入封禁时间(秒，-1为永久) [600-86400 或 -1]: " bantime
-            if [[ "$bantime" == "-1" ]] || ([[ "$bantime" =~ ^[0-9]+$ ]] && [ "$bantime" -ge 600 ] && [ "$bantime" -le 86400 ]); then
-                break
-            fi
-            echo -e "${RED}无效的输入，请输入600-86400之间的数字或-1${NC}"
-        done
-        
-        # 获取 SSH 端口
-        local port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
-        port=${port:-22}  # 默认使用 22 端口
-        
-        # 备份现有配置
-        if [ -f "/etc/fail2ban/jail.local" ]; then
-            cp /etc/fail2ban/jail.local "/etc/fail2ban/jail.local.backup_$(date +%Y%m%d%H%M%S)"
         fi
-        
-        # 生成新配置
-        cat > /etc/fail2ban/jail.local << EOF
+    fi
+
+    # 检查并创建配置文件
+    if [ ! -f "/etc/fail2ban/jail.local" ]; then
+        echo -e "${YELLOW}Fail2ban 配置文件未创建，正在创建默认配置...${NC}"
+        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local || error_exit "无法创建配置文件"
+    fi
+
+    echo -e "\n${BLUE}配置 Fail2ban SSH 防护${NC}"
+    
+    # 验证输入
+    while true; do
+        read -p "请输入最大尝试次数 [3-10]: " maxretry
+        if [[ "$maxretry" =~ ^[0-9]+$ ]] && [ "$maxretry" -ge 3 ] && [ "$maxretry" -le 10 ]; then
+            break
+        fi
+        echo -e "${RED}无效的输入，请输入3-10之间的数字${NC}"
+    done
+    
+    while true; do
+        read -p "请输入封禁时间(秒，-1为永久) [600-86400 或 -1]: " bantime
+        if [[ "$bantime" == "-1" ]] || ([[ "$bantime" =~ ^[0-9]+$ ]] && [ "$bantime" -ge 600 ] && [ "$bantime" -le 86400 ]); then
+            break
+        fi
+        echo -e "${RED}无效的输入，请输入600-86400之间的数字或-1${NC}"
+    done
+    
+    # 获取 SSH 端口
+    local port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
+    port=${port:-22}  # 默认使用 22 端口
+    
+    # 备份现有配置
+    if [ -f "/etc/fail2ban/jail.local" ]; then
+        cp /etc/fail2ban/jail.local "/etc/fail2ban/jail.local.backup_$(date +%Y%m%d%H%M%S)"
+    fi
+    
+    # 生成新配置
+    cat > /etc/fail2ban/jail.local << EOF
 [DEFAULT]
 bantime = $bantime
 findtime = 600
 maxretry = $maxretry
-banaction = ufw
-banaction_allports = ufw
+banaction = iptables-multiport
+banaction_allports = iptables-allports
 
 [sshd]
 enabled = true
@@ -495,14 +480,37 @@ maxretry = $maxretry
 bantime = $bantime
 findtime = 600
 EOF
-        
-        # 重启服务并验证
-        if systemctl restart fail2ban; then
-            echo -e "\n${GREEN}Fail2ban 配置已更新，当前状态：${NC}"
-            fail2ban-client status sshd
-        else
-            error_exit "Fail2ban 服务重启失败"
+    
+    # 确保日志文件存在
+    touch /var/log/auth.log
+    
+    # 重启服务并等待
+    echo -e "${YELLOW}正在重启 Fail2ban 服务...${NC}"
+    systemctl restart fail2ban
+    sleep 3
+    
+    # 验证服务状态
+    if ! systemctl is-active --quiet fail2ban; then
+        error_exit "Fail2ban 服务重启失败，请检查系统日志: journalctl -u fail2ban"
+    fi
+    
+    # 等待 socket 文件创建
+    for i in {1..5}; do
+        if [ -S "/var/run/fail2ban/fail2ban.sock" ]; then
+            break
         fi
+        echo "等待服务就绪... ($i/5)"
+        sleep 1
+    done
+    
+    # 显示状态
+    if [ -S "/var/run/fail2ban/fail2ban.sock" ]; then
+        echo -e "\n${GREEN}Fail2ban 配置已更新，当前状态：${NC}"
+        fail2ban-client status sshd
+    else
+        echo -e "${RED}警告：Fail2ban socket 文件未创建，但服务似乎在运行${NC}"
+        echo "服务状态："
+        systemctl status fail2ban --no-pager
     fi
 }
 
