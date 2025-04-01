@@ -214,11 +214,14 @@ configure_ssh_key() {
             done
 
             # 验证测试
-            echo -e "${BLUE}正在进行连接验证..."
-            if ! ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no -o ConnectTimeout=10 localhost true 2>/dev/null; then
-                error_exit "本地连接测试失败，请检查密钥配置"
+            echo -e "${BLUE}正在进行连接验证...${NC}"
+            if ! ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no -o ConnectTimeout=5 localhost true 2>/dev/null; then
+                echo -e "${YELLOW}警告: 本地连接测试失败，但密钥可能已正确配置${NC}"
+                echo -e "${YELLOW}可能原因: 本地SSH服务配置、防火墙或localhost解析问题${NC}"
+                echo -e "${YELLOW}如果您可以从其他设备使用密钥正常连接，则可以忽略此警告${NC}"
+            else
+                success_msg "密钥验证通过"
             fi
-            success_msg "密钥验证通过"
         fi
     fi
 
@@ -331,6 +334,71 @@ check_ufw_status() {
     
     echo "UFW状态:"
     ufw status verbose
+}
+
+# 开放端口到指定IP
+open_port_to_ip() {
+    clear_screen
+    show_header "开放端口到指定IP"
+    
+    # 验证UFW是否已安装
+    if ! command -v ufw &> /dev/null; then
+        echo -e "${RED}请先安装UFW${NC}"
+        return 1
+    fi
+    
+    # 获取端口信息
+    read -p "请输入要开放的端口号: " port
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo -e "${RED}无效的端口号，请输入1-65535之间的数字${NC}"
+        return 1
+    fi
+    
+    # 获取协议
+    echo -e "${BLUE}请选择协议:${NC}"
+    echo "1. TCP"
+    echo "2. UDP"
+    echo "3. TCP和UDP"
+    read -p "选择协议 [1-3]: " proto_choice
+    
+    case $proto_choice in
+        1) protocol="tcp" ;;
+        2) protocol="udp" ;;
+        3) protocol="tcp,udp" ;;
+        *) 
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+    
+    # 获取IP地址
+    read -p "请输入允许访问的IP地址: " ip_address
+    
+    # 验证IP地址格式
+    if ! [[ $ip_address =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo -e "${RED}无效的IP地址格式${NC}"
+        return 1
+    fi
+    
+    # 确认操作
+    echo -e "${YELLOW}将开放端口 $port/$protocol 给IP $ip_address${NC}"
+    read -p "确认操作? (y/n): " confirm
+    
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # 执行UFW规则添加
+        if [[ "$protocol" == "tcp,udp" ]]; then
+            ufw allow proto tcp from $ip_address to any port $port
+            ufw allow proto udp from $ip_address to any port $port
+            success_msg "已开放端口 $port 的TCP和UDP协议给IP $ip_address"
+        else
+            ufw allow proto $protocol from $ip_address to any port $port
+            success_msg "已开放端口 $port/$protocol 给IP $ip_address"
+        fi
+    else
+        echo -e "${YELLOW}操作已取消${NC}"
+    fi
+    
+    show_footer
 }
 
 # Fail2ban 状态检查函数
@@ -1394,18 +1462,20 @@ ufw_menu() {
         show_menu_item "2" "配置UFW并开放SSH端口"
         show_menu_item "3" "配置UFW PING规则"
         show_menu_item "4" "查看UFW状态"
+        show_menu_item "5" "开放端口到指定IP"
         
         echo -e "${BLUE}┃${NC}"
         show_menu_item "0" "返回主菜单"
         
         show_footer
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-4]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-5]: "${NC})" choice
         case $choice in
             1) install_ufw ;;
             2) configure_ufw ;;
             3) configure_ufw_ping ;;
             4) check_ufw_status ;;
+            5) open_port_to_ip ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
@@ -1579,4 +1649,3 @@ fi
 
 # 运行主菜单
 main_menu
-
