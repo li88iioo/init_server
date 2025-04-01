@@ -401,6 +401,414 @@ open_port_to_ip() {
     show_footer
 }
 
+# 批量端口管理
+manage_batch_ports() {
+    clear_screen
+    show_header "UFW 批量端口管理"
+    
+    # 验证UFW是否已安装
+    if ! command -v ufw &> /dev/null; then
+        echo -e "${RED}请先安装UFW${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}请选择操作:${NC}"
+    echo "1. 批量开放端口"
+    echo "2. 批量关闭端口"
+    echo "3. 批量开放端口到特定IP"
+    echo "4. 批量删除UFW规则"
+    echo "0. 返回"
+    
+    read -p "选择操作 [0-4]: " batch_choice
+    
+    case $batch_choice in
+        1) batch_open_ports ;;
+        2) batch_close_ports ;;
+        3) batch_open_ports_to_ip ;;
+        4) batch_delete_ufw_rules ;;
+        0) return ;;
+        *) 
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+}
+
+# 批量删除UFW规则
+batch_delete_ufw_rules() {
+    clear_screen
+    show_header "批量删除UFW规则"
+    
+    # 显示当前规则并编号
+    echo -e "${BLUE}当前UFW规则:${NC}"
+    echo ""
+    
+    # 获取并显示所有规则
+    mapfile -t rules < <(ufw status numbered | grep -v "(v6)" | grep -E "^\[[0-9]+\]")
+    
+    if [ ${#rules[@]} -eq 0 ]; then
+        echo -e "${YELLOW}没有找到任何UFW规则${NC}"
+        read -p "按回车键返回..." -r
+        return
+    fi
+    
+    # 显示规则列表
+    for i in "${!rules[@]}"; do
+        echo -e "${GREEN}$((i+1))${NC}: ${rules[$i]}"
+    done
+    
+    echo ""
+    echo -e "${YELLOW}删除选项:${NC}"
+    echo "1. 按范围删除规则"
+    echo "2. 按规则号删除多条规则"
+    echo "0. 返回"
+    
+    read -p "选择操作 [0-2]: " delete_choice
+    
+    case $delete_choice in
+        1)
+            echo -e "${YELLOW}请指定要删除的规则范围${NC}"
+            read -p "起始规则号: " start_num
+            read -p "结束规则号: " end_num
+            
+            # 验证输入
+            if ! [[ "$start_num" =~ ^[0-9]+$ ]] || ! [[ "$end_num" =~ ^[0-9]+$ ]]; then
+                echo -e "${RED}无效的规则号${NC}"
+                return 1
+            fi
+            
+            if [ "$start_num" -gt "$end_num" ]; then
+                echo -e "${RED}起始规则号不能大于结束规则号${NC}"
+                return 1
+            fi
+            
+            if [ "$start_num" -lt 1 ] || [ "$end_num" -gt ${#rules[@]} ]; then
+                echo -e "${RED}规则号超出范围${NC}"
+                return 1
+            fi
+            
+            # 确认删除
+            echo -e "${RED}警告: 将删除从 $start_num 到 $end_num 的规则${NC}"
+            read -p "确认删除? (y/n): " confirm
+            
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                # 需要从后向前删除，避免规则号变化
+                for ((i=end_num; i>=start_num; i--)); do
+                    echo -e "${YELLOW}删除规则 $i: ${rules[$i-1]}${NC}"
+                    # 使用yes命令自动确认删除
+                    yes | ufw delete $i
+                done
+                echo -e "${GREEN}批量删除完成${NC}"
+            else
+                echo -e "${YELLOW}操作已取消${NC}"
+            fi
+            ;;
+            
+        2)
+            echo -e "${YELLOW}请输入要删除的规则号，多个规则号用逗号分隔 (例如: 1,3,5)${NC}"
+            read -p "规则号列表: " rule_nums
+            
+            # 验证格式
+            if ! [[ $rule_nums =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                echo -e "${RED}无效的格式，请使用逗号分隔的数字${NC}"
+                return 1
+            fi
+            
+            # 转换为数组并排序（降序）
+            IFS=',' read -ra RULE_ARRAY <<< "$rule_nums"
+            RULE_ARRAY=($(echo "${RULE_ARRAY[@]}" | tr ' ' '\n' | sort -nr | tr '\n' ' '))
+            
+            # 验证规则号是否在有效范围内
+            for num in "${RULE_ARRAY[@]}"; do
+                if [ "$num" -lt 1 ] || [ "$num" -gt ${#rules[@]} ]; then
+                    echo -e "${RED}规则号 $num 超出范围${NC}"
+                    return 1
+                fi
+            done
+            
+            # 确认删除
+            echo -e "${RED}警告: 将删除以下规则号: ${RULE_ARRAY[*]}${NC}"
+            read -p "确认删除? (y/n): " confirm
+            
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                # 从大到小删除，避免规则号变化
+                for num in "${RULE_ARRAY[@]}"; do
+                    echo -e "${YELLOW}删除规则 $num: ${rules[$num-1]}${NC}"
+                    yes | ufw delete $num
+                done
+                echo -e "${GREEN}批量删除完成${NC}"
+            else
+                echo -e "${YELLOW}操作已取消${NC}"
+            fi
+            ;;
+            
+        0)
+            return
+            ;;
+            
+        *)
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+    
+    # 显示更新后的规则状态
+    echo -e "\n${BLUE}更新后的UFW规则:${NC}"
+    ufw status numbered
+    
+    read -p "按回车键继续..." -r
+}
+
+# 批量开放端口
+batch_open_ports() {
+    echo -e "${BLUE}请输入要开放的端口，多个端口用逗号分隔 (例如: 80,443,8080)${NC}"
+    read -p "端口列表: " port_list
+    
+    # 验证端口格式
+    if ! [[ $port_list =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        echo -e "${RED}无效的端口格式，请使用逗号分隔的数字${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}请选择协议:${NC}"
+    echo "1. TCP"
+    echo "2. UDP"
+    echo "3. TCP和UDP"
+    read -p "选择协议 [1-3]: " proto_choice
+    
+    case $proto_choice in
+        1) protocol="tcp" ;;
+        2) protocol="udp" ;;
+        3) protocol="both" ;;
+        *) 
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+    
+    # 确认操作
+    local ports_count=$(echo $port_list | tr ',' '\n' | wc -l)
+    echo -e "${YELLOW}将批量开放 $ports_count 个端口，协议: $protocol${NC}"
+    echo -e "${YELLOW}端口列表: $port_list${NC}"
+    read -p "确认操作? (y/n): " confirm
+    
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        local success_count=0
+        local failed_ports=""
+        
+        # 处理每个端口
+        IFS=',' read -ra PORTS <<< "$port_list"
+        for port in "${PORTS[@]}"; do
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo -e "${RED}跳过无效端口: $port${NC}"
+                failed_ports="$failed_ports,$port"
+                continue
+            fi
+            
+            # 添加规则
+            if [ "$protocol" = "both" ]; then
+                if ufw allow $port/tcp && ufw allow $port/udp; then
+                    echo -e "${GREEN}已开放端口 $port (TCP/UDP)${NC}"
+                    ((success_count++))
+                else
+                    echo -e "${RED}开放端口 $port 失败${NC}"
+                    failed_ports="$failed_ports,$port"
+                fi
+            else
+                if ufw allow $port/$protocol; then
+                    echo -e "${GREEN}已开放端口 $port/$protocol${NC}"
+                    ((success_count++))
+                else
+                    echo -e "${RED}开放端口 $port/$protocol 失败${NC}"
+                    failed_ports="$failed_ports,$port"
+                fi
+            fi
+        done
+        
+        # 总结结果
+        echo -e "\n${BLUE}批量操作完成:${NC}"
+        echo -e "${GREEN}成功: $success_count 个端口${NC}"
+        
+        if [ -n "$failed_ports" ]; then
+            # 去掉第一个逗号
+            failed_ports=${failed_ports:1}
+            echo -e "${RED}失败: $failed_ports${NC}"
+        fi
+    else
+        echo -e "${YELLOW}操作已取消${NC}"
+    fi
+}
+
+# 批量关闭端口
+batch_close_ports() {
+    echo -e "${BLUE}请输入要关闭的端口，多个端口用逗号分隔 (例如: 80,443,8080)${NC}"
+    read -p "端口列表: " port_list
+    
+    # 验证端口格式
+    if ! [[ $port_list =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        echo -e "${RED}无效的端口格式，请使用逗号分隔的数字${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}请选择协议:${NC}"
+    echo "1. TCP"
+    echo "2. UDP"
+    echo "3. TCP和UDP"
+    read -p "选择协议 [1-3]: " proto_choice
+    
+    case $proto_choice in
+        1) protocol="tcp" ;;
+        2) protocol="udp" ;;
+        3) protocol="both" ;;
+        *) 
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+    
+    # 确认操作
+    local ports_count=$(echo $port_list | tr ',' '\n' | wc -l)
+    echo -e "${YELLOW}将批量关闭 $ports_count 个端口，协议: $protocol${NC}"
+    echo -e "${YELLOW}端口列表: $port_list${NC}"
+    read -p "确认操作? (y/n): " confirm
+    
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        local success_count=0
+        local failed_ports=""
+        
+        # 处理每个端口
+        IFS=',' read -ra PORTS <<< "$port_list"
+        for port in "${PORTS[@]}"; do
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo -e "${RED}跳过无效端口: $port${NC}"
+                failed_ports="$failed_ports,$port"
+                continue
+            fi
+            
+            # 删除规则
+            if [ "$protocol" = "both" ]; then
+                if ufw delete allow $port/tcp && ufw delete allow $port/udp; then
+                    echo -e "${GREEN}已关闭端口 $port (TCP/UDP)${NC}"
+                    ((success_count++))
+                else
+                    echo -e "${RED}关闭端口 $port 失败${NC}"
+                    failed_ports="$failed_ports,$port"
+                fi
+            else
+                if ufw delete allow $port/$protocol; then
+                    echo -e "${GREEN}已关闭端口 $port/$protocol${NC}"
+                    ((success_count++))
+                else
+                    echo -e "${RED}关闭端口 $port/$protocol 失败${NC}"
+                    failed_ports="$failed_ports,$port"
+                fi
+            fi
+        done
+        
+        # 总结结果
+        echo -e "\n${BLUE}批量操作完成:${NC}"
+        echo -e "${GREEN}成功: $success_count 个端口${NC}"
+        
+        if [ -n "$failed_ports" ]; then
+            # 去掉第一个逗号
+            failed_ports=${failed_ports:1}
+            echo -e "${RED}失败: $failed_ports${NC}"
+        fi
+    else
+        echo -e "${YELLOW}操作已取消${NC}"
+    fi
+}
+
+# 批量开放端口到特定IP
+batch_open_ports_to_ip() {
+    echo -e "${BLUE}请输入要开放的端口，多个端口用逗号分隔 (例如: 80,443,8080)${NC}"
+    read -p "端口列表: " port_list
+    
+    # 验证端口格式
+    if ! [[ $port_list =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        echo -e "${RED}无效的端口格式，请使用逗号分隔的数字${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}请选择协议:${NC}"
+    echo "1. TCP"
+    echo "2. UDP"
+    echo "3. TCP和UDP"
+    read -p "选择协议 [1-3]: " proto_choice
+    
+    case $proto_choice in
+        1) protocol="tcp" ;;
+        2) protocol="udp" ;;
+        3) protocol="both" ;;
+        *) 
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+    
+    # 获取IP地址
+    read -p "请输入允许访问的IP地址: " ip_address
+    
+    # 验证IP地址格式
+    if ! [[ $ip_address =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo -e "${RED}无效的IP地址格式${NC}"
+        return 1
+    fi
+    
+    # 确认操作
+    local ports_count=$(echo $port_list | tr ',' '\n' | wc -l)
+    echo -e "${YELLOW}将批量开放 $ports_count 个端口到IP $ip_address，协议: $protocol${NC}"
+    echo -e "${YELLOW}端口列表: $port_list${NC}"
+    read -p "确认操作? (y/n): " confirm
+    
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        local success_count=0
+        local failed_ports=""
+        
+        # 处理每个端口
+        IFS=',' read -ra PORTS <<< "$port_list"
+        for port in "${PORTS[@]}"; do
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo -e "${RED}跳过无效端口: $port${NC}"
+                failed_ports="$failed_ports,$port"
+                continue
+            fi
+            
+            # 添加规则
+            if [ "$protocol" = "both" ]; then
+                if ufw allow proto tcp from $ip_address to any port $port && \
+                   ufw allow proto udp from $ip_address to any port $port; then
+                    echo -e "${GREEN}已开放端口 $port (TCP/UDP) 到IP $ip_address${NC}"
+                    ((success_count++))
+                else
+                    echo -e "${RED}开放端口 $port 到IP $ip_address 失败${NC}"
+                    failed_ports="$failed_ports,$port"
+                fi
+            else
+                if ufw allow proto $protocol from $ip_address to any port $port; then
+                    echo -e "${GREEN}已开放端口 $port/$protocol 到IP $ip_address${NC}"
+                    ((success_count++))
+                else
+                    echo -e "${RED}开放端口 $port/$protocol 到IP $ip_address 失败${NC}"
+                    failed_ports="$failed_ports,$port"
+                fi
+            fi
+        done
+        
+        # 总结结果
+        echo -e "\n${BLUE}批量操作完成:${NC}"
+        echo -e "${GREEN}成功: $success_count 个端口${NC}"
+        
+        if [ -n "$failed_ports" ]; then
+            # 去掉第一个逗号
+            failed_ports=${failed_ports:1}
+            echo -e "${RED}失败: $failed_ports${NC}"
+        fi
+    else
+        echo -e "${YELLOW}操作已取消${NC}"
+    fi
+}
+
 # Fail2ban 状态检查函数
 check_fail2ban_installation() {
     local status=0
@@ -1463,19 +1871,21 @@ ufw_menu() {
         show_menu_item "3" "配置UFW PING规则"
         show_menu_item "4" "查看UFW状态"
         show_menu_item "5" "开放端口到指定IP"
+        show_menu_item "6" "批量端口管理"
         
         echo -e "${BLUE}┃${NC}"
         show_menu_item "0" "返回主菜单"
         
         show_footer
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-5]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-6]: "${NC})" choice
         case $choice in
             1) install_ufw ;;
             2) configure_ufw ;;
             3) configure_ufw_ping ;;
             4) check_ufw_status ;;
             5) open_port_to_ip ;;
+            6) manage_batch_ports ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
