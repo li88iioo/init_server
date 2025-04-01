@@ -10,17 +10,17 @@ NC='\033[0m'
 
 # 分隔线
 show_separator() {
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # 添加新的样式函数
 show_header() {
     local title="$1"
-    echo -e "\n${BLUE}┏━━━━━━━━━ ${BOLD}$title${NC}${BLUE} ━━━━━━━━━┓${NC}"
+    echo -e "\n${BLUE}┏${BOLD}$title${NC}${BLUE}          ${NC}"
 }
 
 show_footer() {
-    echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}\n"
+    echo -e "${BLUE}                              ${NC}\n"
 }
 
 show_menu_item() {
@@ -444,7 +444,9 @@ batch_delete_ufw_rules() {
     echo ""
     
     # 获取并显示所有规则
-    mapfile -t rules < <(ufw status numbered | grep -v "(v6)" | grep -E "^\[[0-9]+\]")
+    ufw status numbered | grep -v "Status:"
+    # 使用更灵活的正则表达式匹配带编号的规则
+    mapfile -t rules < <(ufw status numbered | grep -E '^\[[ 0-9]+\]')
     
     if [ ${#rules[@]} -eq 0 ]; then
         echo -e "${YELLOW}没有找到任何UFW规则${NC}"
@@ -494,9 +496,11 @@ batch_delete_ufw_rules() {
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 # 需要从后向前删除，避免规则号变化
                 for ((i=end_num; i>=start_num; i--)); do
-                    echo -e "${YELLOW}删除规则 $i: ${rules[$i-1]}${NC}"
+                    # 从规则行中提取实际的规则号
+                    local rule_num=$(echo "${rules[$i-1]}" | grep -oE '^\[[ ]*([0-9]+)\]' | tr -d '[]' | tr -d ' ')
+                    echo -e "${YELLOW}删除规则 $rule_num: ${rules[$i-1]}${NC}"
                     # 使用yes命令自动确认删除
-                    yes | ufw delete $i
+                    yes | ufw delete $rule_num
                 done
                 echo -e "${GREEN}批量删除完成${NC}"
             else
@@ -533,8 +537,10 @@ batch_delete_ufw_rules() {
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 # 从大到小删除，避免规则号变化
                 for num in "${RULE_ARRAY[@]}"; do
-                    echo -e "${YELLOW}删除规则 $num: ${rules[$num-1]}${NC}"
-                    yes | ufw delete $num
+                    # 从规则行中提取实际的规则号
+                    local rule_num=$(echo "${rules[$num-1]}" | grep -oE '^\[[ ]*([0-9]+)\]' | tr -d '[]' | tr -d ' ')
+                    echo -e "${YELLOW}删除规则 $rule_num: ${rules[$num-1]}${NC}"
+                    yes | ufw delete $rule_num
                 done
                 echo -e "${GREEN}批量删除完成${NC}"
             else
@@ -1957,11 +1963,13 @@ docker_menu() {
         show_menu_item "1" "安装 Docker"
         show_menu_item "2" "安装 Docker Compose"
         
-        echo -e "\n${BLUE}┃${NC} ${BOLD}网络配置${NC}"
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}网络配置${NC}"
         show_menu_item "3" "配置 UFW Docker 规则"
         show_menu_item "4" "开放 Docker 端口"
         
-        echo -e "\n${BLUE}┃${NC} ${BOLD}系统管理${NC}"
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}系统管理${NC}"
         show_menu_item "5" "查看 Docker 容器信息"
         show_menu_item "6" "清理 Docker 资源"
         show_menu_item "7" "查看 Docker 网络信息"
@@ -1998,23 +2006,23 @@ main_menu() {
         clear_screen
         show_header "服务器配置管理系统"
         
-        # 系统管理
-        echo -e "${BLUE}┃${NC} ${BOLD}系统管理${NC}"
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}系统管理${NC}"
         show_menu_item "01" "更新系统"
-        show_menu_item "02" "SSH端口配置"
+        show_menu_item "02" "SSH配置"
         show_menu_item "03" "UFW防火墙配置"
         show_menu_item "04" "Fail2ban配置"
         show_menu_item "05" "ZeroTier配置"
         show_menu_item "06" "Docker配置"
-        show_menu_item "07" "Swap配置"     # 新添加的选项
+        show_menu_item "07" "Swap配置"
         
-        # 应用安装
-        echo -e "\n${BLUE}┃${NC} ${BOLD}应用安装${NC}"
-        show_menu_item "08" "安装1Panel"
-        show_menu_item "09" "安装v2ray-agent"
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}应用安装${NC}"
+        show_menu_item "08" "1Panel安装"
+        show_menu_item "09" "v2ray-agent安装"
         
-        # 系统工具
-        echo -e "\n${BLUE}┃${NC} ${BOLD}系统工具${NC}"
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}系统工具${NC}"
         show_menu_item "10" "系统安全检查"
         show_menu_item "11" "系统安全加固"
         show_menu_item "12" "系统资源监控"
@@ -2034,7 +2042,7 @@ main_menu() {
             4) fail2ban_menu ;;
             5) zerotier_menu ;;
             6) docker_menu ;;
-            7) configure_swap ;;    # 新添加的选项
+            7) configure_swap ;;
             8) install_1panel ;;
             9) install_v2ray_agent ;;
             10) system_security_check ;;
