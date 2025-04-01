@@ -1011,9 +1011,24 @@ create_swap() {
     # 检查是否已存在 swap 文件
     if [ -f /swapfile ]; then
         echo -e "${YELLOW}检测到已存在 Swap 文件${NC}"
+        
+        # 检查swap是否真的在使用中
+        is_swap_active=$(swapon -s | grep -c "/swapfile" || echo 0)
+        
         read -p "是否要调整大小？(y/n): " adjust
         if [[ "$adjust" =~ ^[Yy]$ ]]; then
-            swapoff /swapfile || error_exit "无法关闭现有 Swap"
+            if [ "$is_swap_active" -gt 0 ]; then
+                echo "正在关闭已存在的swap..."
+                swapoff /swapfile || {
+                    echo -e "${YELLOW}警告: 无法正常关闭swap，尝试强制处理...${NC}"
+                    # 尝试先删除旧文件
+                    rm -f /swapfile || error_exit "无法删除现有 Swap 文件"
+                }
+            else
+                echo -e "${YELLOW}检测到swap文件存在但未激活，将直接替换${NC}"
+                # 直接删除，不尝试关闭
+                rm -f /swapfile || error_exit "无法删除现有 Swap 文件"
+            fi
         else
             return
         fi
@@ -1038,7 +1053,10 @@ create_swap() {
     echo -e "${YELLOW}正在创建 Swap 文件，请稍候...${NC}"
     
     # 创建 swap 文件
-    dd if=/dev/zero of=/swapfile bs=1G count=$swap_size status=progress || error_exit "Swap 文件创建失败"
+    # dd if=/dev/zero of=/swapfile bs=1G count=$swap_size status=progress || error_exit "Swap 文件创建失败"
+    
+    # 使用较小的块大小，避免内存不足问题
+    dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress || error_exit "Swap 文件创建失败"
     
     # 设置权限
     chmod 600 /swapfile || error_exit "无法设置 Swap 文件权限"
@@ -1071,8 +1089,18 @@ remove_swap() {
         return
     fi
     
+    # 检查swap是否真的在使用中
+    is_swap_active=$(swapon -s | grep -c "/swapfile" || echo 0)
+    
     # 关闭 swap
-    swapoff /swapfile || error_exit "无法关闭 Swap"
+    if [ "$is_swap_active" -gt 0 ]; then
+        echo "正在关闭swap..."
+        swapoff /swapfile || {
+            echo -e "${YELLOW}警告: 无法正常关闭swap，将强制继续...${NC}"
+        }
+    else
+        echo -e "${YELLOW}注意: Swap文件存在但未被激活${NC}"
+    fi
     
     # 从 fstab 中删除
     sed -i '/\/swapfile/d' /etc/fstab
