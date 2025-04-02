@@ -82,6 +82,8 @@ check_installed() {
     return 0
 }
 
+
+# 功能函数
 # 1. 系统更新和curl安装
 system_update() {
     echo "正在更新系统..."
@@ -838,6 +840,7 @@ batch_open_ports_to_ip() {
     fi
 }
 
+# 4. Fail2ban相关函数
 # Fail2ban 状态检查函数
 check_fail2ban_installation() {
     local status=0
@@ -1054,7 +1057,7 @@ check_fail2ban_status() {
     show_footer
 }
 
-# 4. Fail2ban配置
+#  Fail2ban配置
 install_fail2ban() {
     # 检查是否安装了 lsb-release，如果没有，尝试安装它
     if ! command -v lsb_release &> /dev/null; then
@@ -1092,7 +1095,7 @@ install_fail2ban() {
     success_msg "Fail2ban已安装并启动"
 }
 
-# 5. ZeroTier配置
+# 5. ZeroTier配置相关函数
 install_zerotier() {
     # 检查是否已安装
     if command -v zerotier-cli &> /dev/null; then
@@ -1185,7 +1188,8 @@ configure_zerotier_ssh() {
     success_msg "已开放 ZeroTier 网段 $zt_network 的 SSH 访问"
 }
 
-# 6. Docker 安装函数
+# 6. Docker相关函数
+#  Docker 安装函数
 install_docker() {
 #    echo "正在使用 LinuxMirrors 脚本安装 Docker..."
 #    bash <(curl -sSL https://gitee.com/SuperManito/LinuxMirrors/raw/main/DockerInstallation.sh)
@@ -1468,7 +1472,7 @@ show_docker_networks() {
     show_footer
 }
 
-# 8. Swap 配置函数
+# 7. Swap 配置函数     
 configure_swap() {
     clear_screen
     show_header "Swap 配置管理"
@@ -1668,8 +1672,20 @@ system_security_check() {
     clear_screen
     show_header "系统安全检查"
     
+    # 系统启动和运行时间
+    echo -e "${BLUE}┃${NC} ${BOLD}1. 系统运行信息${NC}"
+    echo -e "${BLUE}┃${NC}"
+    # 系统启动时间
+    boot_time=$(who -b | awk '{print $3, $4}')
+    echo -e "${BLUE}┃${NC} ${YELLOW}系统启动时间:${NC} ${WHITE}${boot_time}${NC}"
+    
+    # 系统运行时间
+    uptime_info=$(uptime -p)
+    echo -e "${BLUE}┃${NC} ${YELLOW}系统运行时间:${NC} ${WHITE}${uptime_info}${NC}"
+    
     # 系统基本信息
-    echo -e "${BLUE}┃${NC} ${BOLD}1. 系统基本信息${NC}"
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}2. 系统基本信息${NC}"
     echo -e "${BLUE}┃${NC}"
     while IFS= read -r line; do
         echo -e "${BLUE}┃${NC} $line"
@@ -1677,7 +1693,7 @@ system_security_check() {
     
     # 当前登录用户
     echo -e "${BLUE}┃${NC}"
-    echo -e "${BLUE}┣━━ ${BOLD}2. 当前登录用户${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}3. 当前登录用户${NC}"
     echo -e "${BLUE}┃${NC}"
     while IFS= read -r line; do
         echo -e "${BLUE}┃${NC} $line"
@@ -1685,7 +1701,7 @@ system_security_check() {
     
     # 开放端口
     echo -e "${BLUE}┃${NC}"
-    echo -e "${BLUE}┣━━ ${BOLD}3. 开放端口及监听服务${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}4. 开放端口及监听服务${NC}"
     echo -e "${BLUE}┃${NC}"
     while IFS= read -r line; do
         echo -e "${BLUE}┃${NC} $line"
@@ -1693,7 +1709,7 @@ system_security_check() {
     
     # 系统更新
     echo -e "${BLUE}┃${NC}"
-    echo -e "${BLUE}┣━━ ${BOLD}4. 系统更新状态${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}5. 系统更新状态${NC}"
     echo -e "${BLUE}┃${NC}"
     if command -v apt &> /dev/null; then
         while IFS= read -r line; do
@@ -1705,15 +1721,31 @@ system_security_check() {
     
     # 登录记录
     echo -e "${BLUE}┃${NC}"
-    echo -e "${BLUE}┣━━ ${BOLD}5. 最近登录记录${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}6. 最近登录记录${NC}"
     echo -e "${BLUE}┃${NC}"
     while IFS= read -r line; do
         echo -e "${BLUE}┃${NC} $line"
     done < <(last -a | head -n 5)
     
+    # 登录失败尝试
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}7. 最近登录失败尝试${NC}"
+    echo -e "${BLUE}┃${NC}"
+    if [ -f /var/log/auth.log ]; then
+        while IFS= read -r line; do
+            echo -e "${BLUE}┃${NC} $line"
+        done < <(grep "Failed password" /var/log/auth.log | tail -5)
+    elif [ -f /var/log/secure ]; then
+        while IFS= read -r line; do
+            echo -e "${BLUE}┃${NC} $line"
+        done < <(grep "Failed password" /var/log/secure | tail -5)
+    else
+        echo -e "${BLUE}┃${NC} ${RED}无法找到认证日志文件${NC}"
+    fi
+    
     # SSH配置
     echo -e "${BLUE}┃${NC}"
-    echo -e "${BLUE}┣━━ ${BOLD}6. SSH 安全配置${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}8. SSH 安全配置${NC}"
     echo -e "${BLUE}┃${NC}"
     if [ -f /etc/ssh/sshd_config ]; then
         while IFS= read -r line; do
@@ -1725,7 +1757,7 @@ system_security_check() {
     
     # 防火墙状态
     echo -e "${BLUE}┃${NC}"
-    echo -e "${BLUE}┣━━ ${BOLD}7. 防火墙状态${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}9. 防火墙状态${NC}"
     echo -e "${BLUE}┃${NC}"
     if command -v ufw &> /dev/null; then
         while IFS= read -r line; do
@@ -1734,6 +1766,31 @@ system_security_check() {
     else
         echo -e "${BLUE}┃${NC} ${YELLOW}UFW 未安装${NC}"
     fi
+    
+    # Fail2ban状态
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}10. Fail2ban状态${NC}"
+    echo -e "${BLUE}┃${NC}"
+    if command -v fail2ban-client &> /dev/null; then
+        while IFS= read -r line; do
+            echo -e "${BLUE}┃${NC} $line"
+        done < <(fail2ban-client status | head -10)
+    else
+        echo -e "${BLUE}┃${NC} ${YELLOW}Fail2ban未安装${NC}"
+    fi
+    
+    
+    # 安全总结
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}13. 安全总结与建议${NC}"
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┃${NC} ${GREEN}系统安全检查完成${NC}"
+    echo -e "${BLUE}┃${NC} ${YELLOW}建议:${NC}"
+    echo -e "${BLUE}┃${NC} 1. 确保防火墙正常运行并配置适当的规则"
+    echo -e "${BLUE}┃${NC} 2. 确保Fail2ban正常运行以防止暴力攻击"
+    echo -e "${BLUE}┃${NC} 3. 定期更新系统和软件包"
+    echo -e "${BLUE}┃${NC} 4. 监控异常登录活动"
+    echo -e "${BLUE}┃${NC} 5. 保持足够的磁盘空间"
     
     show_footer
 }
@@ -1823,7 +1880,101 @@ system_resource_monitor() {
     show_footer
 }
 
-# 13. 网络诊断函数
+# 13. 网络设置相关函数
+# 13-1 DNS修改函数
+modify_dns() {
+    clear_screen
+    show_header "DNS修改"
+    
+    echo -e "${BLUE}┃ ${YELLOW}当前DNS服务器:${NC}"
+    cat /etc/resolv.conf | grep nameserver
+    
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}常用DNS服务器${NC}"
+    echo -e "${BLUE}┃ ${WHITE}1. Google DNS (8.8.8.8, 8.8.4.4)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}2. Cloudflare DNS (1.1.1.1, 1.0.0.1)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}3. 阿里DNS (223.5.5.5, 223.6.6.6)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}4. 自定义DNS${NC}"
+    echo -e "${BLUE}┃ ${WHITE}0. 返回${NC}"
+    echo -e "${BLUE}┃${NC}"
+    
+    read -p "$(echo -e ${YELLOW}"请选择 [0-4]: "${NC})" choice
+    
+    case $choice in
+        1) 
+            echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf > /dev/null
+            echo "nameserver 8.8.4.4" | sudo tee -a /etc/resolv.conf > /dev/null
+            echo -e "${GREEN}已设置为Google DNS${NC}"
+            ;;
+        2) 
+            echo "nameserver 1.1.1.1" | sudo tee /etc/resolv.conf > /dev/null
+            echo "nameserver 1.0.0.1" | sudo tee -a /etc/resolv.conf > /dev/null
+            echo -e "${GREEN}已设置为Cloudflare DNS${NC}"
+            ;;
+        3) 
+            echo "nameserver 223.5.5.5" | sudo tee /etc/resolv.conf > /dev/null
+            echo "nameserver 223.6.6.6" | sudo tee -a /etc/resolv.conf > /dev/null
+            echo -e "${GREEN}已设置为阿里DNS${NC}"
+            ;;
+        4)
+            read -p "$(echo -e ${YELLOW}"请输入主DNS服务器IP: "${NC})" primary_dns
+            read -p "$(echo -e ${YELLOW}"请输入备用DNS服务器IP(可留空): "${NC})" secondary_dns
+            
+            echo "nameserver $primary_dns" | sudo tee /etc/resolv.conf > /dev/null
+            if [ -n "$secondary_dns" ]; then
+                echo "nameserver $secondary_dns" | sudo tee -a /etc/resolv.conf > /dev/null
+            fi
+            echo -e "${GREEN}DNS设置已更新${NC}"
+            ;;
+        0) return ;;
+        *) echo -e "${RED}无效的选择${NC}" ;;
+    esac
+}
+
+# 13-2 系统时区修改函数
+modify_timezone() {
+    clear_screen
+    show_header "系统时区修改"
+    
+    echo -e "${BLUE}┃ ${YELLOW}当前时区:${NC}"
+    timedatectl | grep "Time zone"
+    
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}常用时区${NC}"
+    echo -e "${BLUE}┃ ${WHITE}1. 亚洲/上海 (Asia/Shanghai)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}2. 亚洲/香港 (Asia/Hong_Kong)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}3. 亚洲/东京 (Asia/Tokyo)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}4. 美国/洛杉矶 (America/Los_Angeles)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}5. 美国/纽约 (America/New_York)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}6. 欧洲/伦敦 (Europe/London)${NC}"
+    echo -e "${BLUE}┃ ${WHITE}7. 自定义时区${NC}"
+    echo -e "${BLUE}┃ ${WHITE}0. 返回${NC}"
+    echo -e "${BLUE}┃${NC}"
+    
+    read -p "$(echo -e ${YELLOW}"请选择 [0-7]: "${NC})" choice
+    
+    case $choice in
+        1) sudo timedatectl set-timezone Asia/Shanghai ;;
+        2) sudo timedatectl set-timezone Asia/Hong_Kong ;;
+        3) sudo timedatectl set-timezone Asia/Tokyo ;;
+        4) sudo timedatectl set-timezone America/Los_Angeles ;;
+        5) sudo timedatectl set-timezone America/New_York ;;
+        6) sudo timedatectl set-timezone Europe/London ;;
+        7)
+            echo -e "${YELLOW}可用时区列表:${NC}"
+            timedatectl list-timezones | less
+            read -p "$(echo -e ${YELLOW}"请输入时区名称: "${NC})" custom_timezone
+            sudo timedatectl set-timezone "$custom_timezone"
+            ;;
+        0) return ;;
+        *) echo -e "${RED}无效的选择${NC}" ;;
+    esac
+    
+    echo -e "${GREEN}时区已更新为: $(timedatectl | grep 'Time zone' | awk '{print $3}')${NC}"
+}
+
+
+# 13-3 网络诊断函数
 network_diagnostic() {
     clear_screen
     show_header "网络诊断"
@@ -1862,6 +2013,74 @@ network_diagnostic() {
     show_footer
 }
 
+# 13-4 IPv6设置函数
+ipv6_settings() {
+    clear_screen
+    show_header "IPv6设置"
+    
+    # 检查当前IPv6状态
+    ipv6_disabled=$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)
+    if [ "$ipv6_disabled" == "1" ]; then
+        current_status="IPv6当前状态: 已禁用"
+        option_text="启用IPv6"
+    else
+        current_status="IPv6当前状态: 已启用"
+        option_text="禁用IPv6"
+    fi
+    
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┃ ${YELLOW}${current_status}${NC}"
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┣━━ ${BOLD}IPv6选项${NC}"
+    echo -e "${BLUE}┃${NC}"
+    show_menu_item "1" "${option_text}"
+    show_menu_item "0" "返回上级菜单"
+    
+    show_footer
+    
+    read -p "$(echo -e ${YELLOW}"请选择操作 [0-1]: "${NC})" choice
+    
+    case $choice in
+        1)
+            if [ "$ipv6_disabled" == "1" ]; then
+                # 启用IPv6
+                echo "0" | sudo tee /proc/sys/net/ipv6/conf/all/disable_ipv6 > /dev/null
+                echo "0" | sudo tee /proc/sys/net/ipv6/conf/default/disable_ipv6 > /dev/null
+                
+                # 永久修改
+                if [ -f /etc/sysctl.conf ]; then
+                    sudo sed -i '/net.ipv6.conf.all.disable_ipv6/d' /etc/sysctl.conf
+                    sudo sed -i '/net.ipv6.conf.default.disable_ipv6/d' /etc/sysctl.conf
+                    echo "net.ipv6.conf.all.disable_ipv6 = 0" | sudo tee -a /etc/sysctl.conf > /dev/null
+                    echo "net.ipv6.conf.default.disable_ipv6 = 0" | sudo tee -a /etc/sysctl.conf > /dev/null
+                    sudo sysctl -p > /dev/null
+                fi
+                
+                echo -e "${GREEN}IPv6已成功启用${NC}"
+            else
+                # 禁用IPv6
+                echo "1" | sudo tee /proc/sys/net/ipv6/conf/all/disable_ipv6 > /dev/null
+                echo "1" | sudo tee /proc/sys/net/ipv6/conf/default/disable_ipv6 > /dev/null
+                
+                # 永久修改
+                if [ -f /etc/sysctl.conf ]; then
+                    sudo sed -i '/net.ipv6.conf.all.disable_ipv6/d' /etc/sysctl.conf
+                    sudo sed -i '/net.ipv6.conf.default.disable_ipv6/d' /etc/sysctl.conf
+                    echo "net.ipv6.conf.all.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
+                    echo "net.ipv6.conf.default.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
+                    sudo sysctl -p > /dev/null
+                fi
+                
+                echo -e "${GREEN}IPv6已成功禁用${NC}"
+            fi
+            ;;
+        0) return ;;
+        *) echo -e "${RED}无效的选择${NC}" ;;
+    esac
+}
+
+
+#子菜单
 # SSH配置子菜单
 ssh_menu() {
     while true; do
@@ -1871,8 +2090,8 @@ ssh_menu() {
         show_menu_item "1" "修改SSH端口"
         show_menu_item "2" "查看当前SSH端口"
         show_menu_item "3" "配置SSH密钥认证"
-        
-        echo -e "${BLUE}┃${NC}"
+    
+    echo -e "${BLUE}┃${NC}"
         show_menu_item "0" "返回主菜单"
         
         show_footer
@@ -1902,7 +2121,7 @@ ufw_menu() {
         show_menu_item "5" "开放端口到指定IP"
         show_menu_item "6" "批量端口管理"
         
-        echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┃${NC}"
         show_menu_item "0" "返回主菜单"
         
         show_footer
@@ -2018,6 +2237,56 @@ docker_menu() {
     done
 }
 
+# 网络设置菜单
+network_settings_menu() {
+    while true; do
+        clear_screen
+        show_header "网络设置"
+        
+        # 显示当前服务器IP地址
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}服务器网络信息${NC}"
+        
+        # 获取IPv4地址
+        ipv4_addr=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -1)
+        echo -e "${BLUE}┃ ${YELLOW}IPv4地址: ${WHITE}${ipv4_addr:-未检测到}${NC}"
+        
+        # 获取IPv6地址
+        ipv6_addr=$(ip -6 addr show | grep -oP '(?<=inet6\s)[\da-f:]+'| grep -v "::1" | head -1)
+        echo -e "${BLUE}┃ ${YELLOW}IPv6地址: ${WHITE}${ipv6_addr:-未检测到}${NC}"
+        
+        # 检查IPv6状态
+        ipv6_status="已启用"
+        if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)" == "1" ]; then
+            ipv6_status="已禁用"
+        fi
+        echo -e "${BLUE}┃ ${YELLOW}IPv6状态: ${WHITE}${ipv6_status}${NC}"
+        
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}网络设置选项${NC}"
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "1" "DNS修改"
+        show_menu_item "2" "系统时区修改"
+        show_menu_item "3" "网络诊断"
+        show_menu_item "4" "IPv6设置"
+        show_menu_item "0" "返回主菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-4]: "${NC})" choice
+        
+        case $choice in
+            1) modify_dns ;;
+            2) modify_timezone ;;
+            3) network_diagnostic ;;
+            4) ipv6_settings ;;
+            0) return ;;
+            *) echo -e "${RED}无效的选择${NC}" ;;
+        esac
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
+    done
+}
+
 # 清屏函数
 clear_screen() {
     clear || echo -e "\n\n\n\n\n"
@@ -2049,12 +2318,17 @@ main_menu() {
         show_menu_item "10" "系统安全检查"
         show_menu_item "11" "系统安全加固"
         show_menu_item "12" "系统资源监控"
-        show_menu_item "13" "网络诊断"
+        show_menu_item "13" "网络设置"
         
         echo -e "${BLUE}┃${NC}"
         show_menu_item "0" "退出系统"
         
         show_footer
+        
+        # 显示服务器时区和时间
+        current_timezone=$(timedatectl | grep "Time zone" | awk '{print $3}')
+        current_time=$(date "+%Y-%m-%d %H:%M:%S")
+        echo -e "${YELLOW}服务器时区: ${current_timezone} | 当前时间: ${current_time}${NC}"
         
         read -p "$(echo -e ${YELLOW}"请选择操作 [0-13]: "${NC})" choice
         
@@ -2071,7 +2345,7 @@ main_menu() {
             10) system_security_check ;;
             11) system_security_hardening ;;
             12) system_resource_monitor ;;
-            13) network_diagnostic ;;
+            13) network_settings_menu ;;
             0) 
                 clear_screen
                 echo -e "${GREEN}感谢使用，再见！${NC}"
@@ -2090,3 +2364,4 @@ fi
 
 # 运行主菜单
 main_menu
+    
