@@ -2079,6 +2079,180 @@ ipv6_settings() {
     esac
 }
 
+# 13-5 主机名和hosts文件管理菜单
+hostname_hosts_menu() {
+    while true; do
+        clear_screen
+        show_header "主机名和hosts文件管理"
+        
+        # 显示当前主机名
+        current_hostname=$(hostname)
+        echo -e "${BLUE}┃ ${YELLOW}当前主机名: ${WHITE}${current_hostname}${NC}"
+        echo -e "${BLUE}┃${NC}"
+        
+        echo -e "${BLUE}┣━━ ${BOLD}管理选项${NC}"
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "1" "修改系统主机名"
+        show_menu_item "2" "编辑hosts文件"
+        show_menu_item "3" "查看当前hosts文件"
+        show_menu_item "0" "返回上级菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-3]: "${NC})" choice
+        
+        case $choice in
+            1) modify_hostname ;;
+            2) edit_hosts_file ;;
+            3) view_hosts_file ;;
+            0) return ;;
+            *) echo -e "${RED}无效的选择${NC}" ;;
+        esac
+        [ "$choice" != "0" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
+    done
+}
+
+# 修改系统主机名
+modify_hostname() {
+    clear_screen
+    show_header "修改系统主机名"
+    
+    current_hostname=$(hostname)
+    echo -e "${BLUE}┃ ${YELLOW}当前主机名: ${WHITE}${current_hostname}${NC}"
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┃ ${YELLOW}请输入新的主机名:${NC}"
+    echo -e "${BLUE}┃${NC}"
+    
+    read -p "$(echo -e ${YELLOW}"新主机名: "${NC})" new_hostname
+    
+    if [ -z "$new_hostname" ]; then
+        echo -e "${RED}主机名不能为空${NC}"
+        return
+    fi
+    
+    # 检查主机名是否合法（只允许字母、数字、连字符）
+    if ! [[ "$new_hostname" =~ ^[a-zA-Z0-9-]+$ ]]; then
+        echo -e "${RED}主机名只能包含字母、数字和连字符${NC}"
+        return
+    fi
+    
+    # 修改主机名
+    echo -e "${YELLOW}正在修改主机名...${NC}"
+    
+    # 对于使用hostnamectl的系统（systemd）
+    if command -v hostnamectl &> /dev/null; then
+        sudo hostnamectl set-hostname "$new_hostname"
+    else
+        # 传统方式设置主机名
+        sudo hostname "$new_hostname"
+        
+        # 永久保存主机名
+        if [ -f /etc/hostname ]; then
+            echo "$new_hostname" | sudo tee /etc/hostname > /dev/null
+        fi
+    fi
+    
+    # 更新/etc/hosts文件中的主机名
+    if [ -f /etc/hosts ]; then
+        # 备份hosts文件
+        sudo cp /etc/hosts /etc/hosts.bak
+        
+        # 更新localhost行中的主机名
+        sudo sed -i "s/127.0.1.1.*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
+        
+        echo -e "${GREEN}已在/etc/hosts文件中更新主机名${NC}"
+    fi
+    
+    echo -e "${GREEN}主机名已成功修改为: ${new_hostname}${NC}"
+    echo -e "${YELLOW}注意: 某些服务可能需要重启才能识别新的主机名${NC}"
+}
+
+# 编辑hosts文件
+edit_hosts_file() {
+    clear_screen
+    show_header "编辑hosts文件"
+    
+    echo -e "${BLUE}┃ ${YELLOW}添加自定义域名映射到hosts文件${NC}"
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┃ ${WHITE}格式: IP地址 域名${NC}"
+    echo -e "${BLUE}┃ ${WHITE}例如: 192.168.1.100 myserver.local${NC}"
+    echo -e "${BLUE}┃${NC}"
+    
+    read -p "$(echo -e ${YELLOW}"IP地址: "${NC})" ip_address
+    
+    # 验证IP地址格式
+    if ! [[ "$ip_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "${RED}无效的IP地址格式${NC}"
+        return
+    fi
+    
+    read -p "$(echo -e ${YELLOW}"域名: "${NC})" domain_name
+    
+    # 验证域名格式
+    if [ -z "$domain_name" ]; then
+        echo -e "${RED}域名不能为空${NC}"
+        return
+    fi
+    
+    # 检查是否已存在相同映射
+    if grep -q "^$ip_address[[:space:]]*$domain_name" /etc/hosts; then
+        echo -e "${YELLOW}警告: 该映射已存在于hosts文件中${NC}"
+        read -p "$(echo -e ${YELLOW}"是否仍然添加? (y/n): "${NC})" confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo -e "${YELLOW}操作已取消${NC}"
+            return
+        fi
+    fi
+    
+    # 备份hosts文件
+    sudo cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
+    
+    # 添加新映射到hosts文件
+    echo "$ip_address $domain_name" | sudo tee -a /etc/hosts > /dev/null
+    
+    echo -e "${GREEN}已成功添加映射: ${ip_address} → ${domain_name}${NC}"
+    echo -e "${GREEN}hosts文件已备份为: /etc/hosts.bak.$(date +%Y%m%d%H%M%S)${NC}"
+}
+
+# 查看hosts文件内容
+view_hosts_file() {
+    clear_screen
+    show_header "当前hosts文件内容"
+    
+    echo -e "${BLUE}┃${NC}"
+    cat /etc/hosts | while IFS= read -r line; do
+        echo -e "${BLUE}┃${NC} $line"
+    done
+    echo -e "${BLUE}┃${NC}"
+    
+    # 添加选项删除特定映射
+    echo -e "${BLUE}┣━━ ${BOLD}操作选项${NC}"
+    echo -e "${BLUE}┃${NC}"
+    show_menu_item "1" "删除hosts文件中的映射"
+    show_menu_item "0" "返回上级菜单"
+    
+    read -p "$(echo -e ${YELLOW}"请选择操作 [0-1]: "${NC})" choice
+    
+    case $choice in
+        1)
+            read -p "$(echo -e ${YELLOW}"请输入要删除的域名: "${NC})" domain_to_delete
+            if [ -z "$domain_to_delete" ]; then
+                echo -e "${RED}域名不能为空${NC}"
+                return
+            fi
+            
+            # 备份hosts文件
+            sudo cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
+            
+            # 删除包含该域名的行
+            sudo sed -i "/[[:space:]]$domain_to_delete[[:space:]]*$/d" /etc/hosts
+            
+            echo -e "${GREEN}已删除域名 ${domain_to_delete} 的映射${NC}"
+            ;;
+        0) return ;;
+        *) echo -e "${RED}无效的选择${NC}" ;;
+    esac
+}
 
 #子菜单
 # SSH配置子菜单
@@ -2269,6 +2443,7 @@ network_settings_menu() {
         show_menu_item "2" "系统时区修改"
         show_menu_item "3" "网络诊断"
         show_menu_item "4" "IPv6设置"
+        show_menu_item "5" "主机名和hosts文件管理"
         show_menu_item "0" "返回主菜单"
         
         show_footer
@@ -2280,6 +2455,7 @@ network_settings_menu() {
             2) modify_timezone ;;
             3) network_diagnostic ;;
             4) ipv6_settings ;;
+            5) hostname_hosts_menu ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
