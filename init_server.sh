@@ -2421,10 +2421,24 @@ network_settings_menu() {
         echo -e "${BLUE}┃${NC}"
         echo -e "${BLUE}┣━━ ${BOLD}服务器网络信息${NC}"
         
-        # 获取IPv4地址
-        ipv4_addr=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -1)
-        echo -e "${BLUE}┃ ${YELLOW}IPv4地址: ${WHITE}${ipv4_addr:-未检测到}${NC}"
-        
+        # 获取IPv4地址(本地接口)
+        pv4_addr=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -1)
+
+        # 获取公网IPv4地址
+        if command -v curl &> /dev/null; then
+            public_ipv4=$(curl -s ipinfo.io/ip 2>/dev/null)
+    
+        # 检查是否获取到公网IP
+        if [ -n "$public_ipv4" ] && [ "$ipv4_addr" != "$public_ipv4" ]; then
+            echo -e "${BLUE}┃ ${YELLOW}内网IPv4地址: ${WHITE}${ipv4_addr:-未检测到}${NC}"
+            echo -e "${BLUE}┃ ${YELLOW}公网IPv4地址: ${WHITE}${public_ipv4}${NC}"
+        else
+            echo -e "${BLUE}┃ ${YELLOW}IPv4地址: ${WHITE}${ipv4_addr:-未检测到}${NC}"
+        fi
+    else
+    echo -e "${BLUE}┃ ${YELLOW}IPv4地址: ${WHITE}${ipv4_addr:-未检测到}${NC}"
+    echo -e "${BLUE}┃ ${YELLOW}公网IPv4地址: ${RED}未检测到 (需要安装curl)${NC}"
+    fi
         # 获取IPv6地址
         ipv6_addr=$(ip -6 addr show | grep -oP '(?<=inet6\s)[\da-f:]+'| grep -v "::1" | head -1)
         echo -e "${BLUE}┃ ${YELLOW}IPv6地址: ${WHITE}${ipv6_addr:-未检测到}${NC}"
