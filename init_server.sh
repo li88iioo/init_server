@@ -2500,12 +2500,13 @@ main_menu() {
         show_menu_item "0" "退出系统"
         
         show_footer
-                
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-13]: "${NC})" choice
+        
         # 显示服务器时区和时间
         current_timezone=$(timedatectl | grep "Time zone" | awk '{print $3}')
         current_time=$(date "+%Y-%m-%d %H:%M:%S")
-        echo -e "${GREEN}服务器时区: ${current_timezone} ${WHITE}| ${CYAN}当前时间: ${current_time}${NC}"
+        echo -e "${GREEN}服务器时区: ${current_timezone} ${WHITE}| ${CYAN}当前时间: ${current_time}${NC}"  
+              
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-13]: "${NC})" choice
         case $choice in
             1) system_update ;;
             2) ssh_menu ;;
