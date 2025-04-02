@@ -261,9 +261,32 @@ configure_ssh_key() {
 # 3. UFW防火墙配置
 install_ufw() {
     apt install ufw -y || error_exit "UFW安装失败"
+    
+    # 确保UFW服务启用并启动
     systemctl enable ufw
-    systemctl start ufw
-    success_msg "UFW已安装并启动"
+    
+    # 尝试启动UFW
+    if ! systemctl start ufw; then
+        echo -e "${YELLOW}UFW服务首次启动失败，尝试重新启动...${NC}"
+        systemctl restart ufw
+    fi
+    
+    # 验证UFW状态
+    if systemctl is-active --quiet ufw; then
+        success_msg "UFW已安装并成功启动"
+    else
+        # 如果仍未启动，尝试重置UFW并重新启动
+        echo -e "${YELLOW}UFW启动失败，尝试重置并重新启动...${NC}"
+        ufw reset
+        systemctl restart ufw
+        
+        if systemctl is-active --quiet ufw; then
+            success_msg "UFW已重置并成功启动"
+        else
+            echo -e "${RED}UFW无法启动，请手动检查：systemctl status ufw${NC}"
+            return 1
+        fi
+    fi
 }
 
 configure_ufw() {
