@@ -8,6 +8,12 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# 处理Docker输出格式的函数
+format_docker_output() {
+    # 替换可能未正确解析的ANSI颜色码
+    sed 's/33\[0;34m/\\033[0;34m/g' | sed 's/33\[0m/\\033[0m/g' | sed 's/\\033/\033/g' | sed 's/\\0\\033/\033/g' | sed 's/\\0\\0/\0/g'
+}
+
 # 分隔线
 show_separator() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1304,7 +1310,17 @@ show_docker_container_info() {
     # 显示容器列表
     echo -e "${BLUE}┃${NC} ${BOLD}容器列表${NC}"
     echo -e "${BLUE}┃${NC}"
-    docker ps -a --format "table ${BLUE}┃${NC} {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Networks}}"
+    
+    # 手动打印标题行
+    printf "${BLUE}┃${NC} %-12s %-25s %-40s %-s\n" "CONTAINER ID" "NAMES" "IMAGE" "STATUS"
+    
+    # 使用printf精确控制列宽和对齐
+    docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}" | \
+    while IFS='|' read -r id name image status; do
+        # 使用短ID (前12个字符)
+        short_id="${id:0:12}"
+        printf "${BLUE}┃${NC} %-12s %-25s %-40s %-s\n" "$short_id" "$name" "$image" "$status"
+    done
     
     # 获取所有容器ID
     container_ids=$(docker ps -aq)
@@ -1343,6 +1359,17 @@ ${BLUE}┃${NC}  ${GREEN}块 I/O:${NC} {{.BlockIO}}")
                 echo -e "${BLUE}┃${NC}  ${GREEN}网关:${NC} $gateway"
             fi
             
+            # 添加端口映射信息
+            ports=$(docker port "$container_id" 2>/dev/null)
+            if [[ -n "$ports" ]]; then
+                echo -e "${BLUE}┃${NC}  ${GREEN}端口映射:${NC}"
+                echo "$ports" | while read port_line; do
+                    echo -e "${BLUE}┃${NC}    • $port_line"
+                done
+            else
+                echo -e "${BLUE}┃${NC}  ${GREEN}端口映射:${NC} ${YELLOW}无暴露端口${NC}"
+            fi
+            
             echo -e "${BLUE}┃${NC}"
             echo -e "${BLUE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         done
@@ -1354,7 +1381,7 @@ ${BLUE}┃${NC}  ${GREEN}块 I/O:${NC} {{.BlockIO}}")
     echo -e "${BLUE}┃${NC}"
     echo -e "${BLUE}┣━━ ${YELLOW}Docker 总体资源使用情况${NC}"
     echo -e "${BLUE}┃${NC}"
-    docker system df | sed "s/^/${BLUE}┃${NC} /"
+    docker system df | awk '{print "'"${BLUE}"'┃'"${NC}"' " $0}' | format_docker_output
     
     show_footer
 }
@@ -1423,7 +1450,7 @@ show_docker_networks() {
     # 列出所有网络
     echo -e "${BLUE}┃${NC} ${BOLD}网络列表${NC}"
     echo -e "${BLUE}┃${NC}"
-    docker network ls | sed "s/^/${BLUE}┃${NC} /"
+    docker network ls | awk '{print "'"${BLUE}"'┃'"${NC}"' " $0}' | format_docker_output
     
     # 显示每个网络的详细信息
     networks=$(docker network ls -q)
