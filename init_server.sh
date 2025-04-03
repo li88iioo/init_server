@@ -1216,6 +1216,236 @@ install_docker_compose() {
     success_msg "Docker Compose 安装完成"
 }
 
+# 添加进度条/等待提示函数
+show_loading() {
+    local message="$1"
+    local duration=${2:-20}  # 默认等待20秒
+    local i=0
+    
+    echo -ne "${YELLOW}$message "
+    while [ $i -lt $duration ]; do
+        for s in / - \\ \|; do
+            echo -ne "\b$s"
+            sleep 0.25
+        done
+        i=$((i+1))
+    done
+    echo -ne "\b${NC}"
+    echo ""
+}
+
+# Docker 镜像加速配置函数
+configure_docker_mirror() {
+    clear_screen
+    show_header "Docker 镜像加速配置"
+    
+    # 检查Docker是否安装
+    if ! command -v docker &> /dev/null; then
+        echo -e "${BLUE}┃${NC} ${RED}Docker 未安装，请先安装 Docker${NC}"
+        show_footer
+        return 1
+    fi
+    
+    echo -e "${BLUE}┃${NC} ${BOLD}可用的镜像加速服务${NC}"
+    echo -e "${BLUE}┃${NC}"
+    echo -e "${BLUE}┃${NC} 1) 阿里云镜像加速"
+    echo -e "${BLUE}┃${NC} 2) 腾讯云镜像加速"
+    echo -e "${BLUE}┃${NC} 3) 华为云镜像加速"
+    echo -e "${BLUE}┃${NC} 4) 中科大镜像加速"
+    echo -e "${BLUE}┃${NC} 5) 网易云镜像加速"
+    echo -e "${BLUE}┃${NC} 6) Docker中国官方镜像加速"
+    echo -e "${BLUE}┃${NC} 7) 自定义镜像加速地址"
+    echo -e "${BLUE}┃${NC} 8) 删除镜像加速配置"
+    echo -e "${BLUE}┃${NC} 0) 返回上级菜单"
+    echo -e "${BLUE}┃${NC}"
+    
+    # 检查当前配置
+    if [ -f "/etc/docker/daemon.json" ]; then
+        echo -e "${BLUE}┃${NC} ${GREEN}当前配置的镜像加速:${NC}"
+        echo -e "${BLUE}┃${NC}"
+        # 提取镜像URL并以简单格式显示
+        mirrors=$(grep -o '"https://[^"]*"' /etc/docker/daemon.json)
+        if [ -n "$mirrors" ]; then
+            echo "$mirrors" | sed 's/"//g' | while read -r url; do
+                echo -e "${BLUE}┃${NC}  • $url"
+            done
+        else
+            echo -e "${BLUE}┃${NC}  无法解析镜像URL，查看原始配置:"
+            cat /etc/docker/daemon.json | while read -r line; do
+                echo -e "${BLUE}┃${NC}    $line"
+            done
+        fi
+        echo -e "${BLUE}┃${NC}"
+    else
+        echo -e "${BLUE}┃${NC} ${YELLOW}当前未配置镜像加速${NC}"
+    fi
+    
+    echo -e "${BLUE}┃${NC}"
+    show_footer
+    
+    read -p "$(echo -e ${YELLOW}"请选择镜像加速服务 [0-8]: "${NC})" choice
+    
+    # 根据用户选择设置镜像
+    mirror_url=""
+    case $choice in
+        1) mirror_url="https://your-id.mirror.aliyuncs.com" ;;
+        2) mirror_url="https://mirror.ccs.tencentyun.com" ;;
+        3) mirror_url="https://your-id.mirror.swr.myhuaweicloud.com" ;;
+        4) mirror_url="https://docker.mirrors.ustc.edu.cn" ;;
+        5) mirror_url="https://hub-mirror.c.163.com" ;;
+        6) mirror_url="https://registry.docker-cn.com" ;;
+        7)
+            read -p "$(echo -e ${YELLOW}"请输入自定义镜像加速地址: "${NC})" custom_url
+            if [ -n "$custom_url" ]; then
+                mirror_url="$custom_url"
+            else
+                echo -e "${RED}未提供有效的镜像地址${NC}"
+                return 1
+            fi
+            ;;
+        8)
+            # 删除镜像加速配置
+            if [ -f "/etc/docker/daemon.json" ]; then
+                # 创建备份
+                cp /etc/docker/daemon.json /etc/docker/daemon.json.bak.$(date +%Y%m%d%H%M%S)
+                
+                # 简单地创建一个空的配置文件
+                echo '{}' > /etc/docker/daemon.json
+                
+                # 重启Docker服务
+                echo -e "${YELLOW}正在重启Docker服务...${NC}"
+                show_loading "等待Docker服务重启" 5
+                
+                if systemctl restart docker; then
+                    echo -e "${GREEN}已删除镜像加速配置并重启Docker服务${NC}"
+                else
+                    echo -e "${RED}Docker服务重启失败，恢复备份...${NC}"
+                    # 恢复最近的备份
+                    cp "$(ls -t /etc/docker/daemon.json.bak.* | head -1)" /etc/docker/daemon.json
+                    show_loading "正在恢复原配置" 3
+                    systemctl restart docker
+                    echo -e "${YELLOW}已恢复备份${NC}"
+                fi
+            else
+                echo -e "${YELLOW}未发现镜像加速配置${NC}"
+            fi
+            return
+            ;;
+        0) return ;;
+        *) 
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
+    
+    # 为阿里云和华为云显示说明信息
+    if [ "$choice" == "1" ]; then
+        echo -e "${YELLOW}注意: 阿里云镜像加速需要登录阿里云获取专属地址${NC}"
+        echo -e "${YELLOW}请访问 https://cr.console.aliyun.com/ 获取您的专属镜像加速地址${NC}"
+        read -p "$(echo -e ${YELLOW}"请输入您的阿里云镜像专属地址: "${NC})" ali_url
+        if [ -n "$ali_url" ]; then
+            mirror_url="$ali_url"
+        else
+            echo -e "${RED}未提供有效的阿里云镜像地址${NC}"
+            return 1
+        fi
+    elif [ "$choice" == "3" ]; then
+        echo -e "${YELLOW}注意: 华为云镜像加速需要登录华为云获取专属地址${NC}"
+        echo -e "${YELLOW}请访问华为云 SWR 控制台获取您的专属镜像加速地址${NC}"
+        read -p "$(echo -e ${YELLOW}"请输入您的华为云镜像专属地址: "${NC})" huawei_url
+        if [ -n "$huawei_url" ]; then
+            mirror_url="$huawei_url"
+        else
+            echo -e "${RED}未提供有效的华为云镜像地址${NC}"
+            return 1
+        fi
+    fi
+    
+    # 创建或更新daemon.json文件
+    if [ -n "$mirror_url" ]; then
+        mkdir -p /etc/docker
+        
+        # 测试镜像配置开始
+        echo -e "${YELLOW}正在测试镜像地址有效性...${NC}"
+        # 创建临时配置文件
+        echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /tmp/test_daemon.json
+
+        # 临时备份当前配置
+        if [ -f "/etc/docker/daemon.json" ]; then
+            cp /etc/docker/daemon.json /etc/docker/daemon.json.tmp
+        fi
+
+        # 应用测试配置
+        cp /tmp/test_daemon.json /etc/docker/daemon.json
+
+        # 测试Docker是否能启动
+        show_loading "测试镜像配置" 5
+        if ! systemctl restart docker; then
+            echo -e "${RED}使用此镜像地址无法启动Docker，可能是镜像地址无效${NC}"
+            echo -e "${YELLOW}正在恢复原配置...${NC}"
+            # 恢复原配置
+            if [ -f "/etc/docker/daemon.json.tmp" ]; then
+                cp /etc/docker/daemon.json.tmp /etc/docker/daemon.json
+                rm /etc/docker/daemon.json.tmp
+                show_loading "恢复原配置" 3
+                systemctl restart docker
+            fi
+            return 1
+        fi
+
+        # 如果成功，清理临时文件
+        if [ -f "/etc/docker/daemon.json.tmp" ]; then
+            rm /etc/docker/daemon.json.tmp
+        fi
+        echo -e "${GREEN}镜像地址测试通过!${NC}"
+        # 测试镜像配置结束
+        
+        if [ -f "/etc/docker/daemon.json" ]; then
+            # 创建备份
+            cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+            
+            # 检查是否已有registry-mirrors配置
+            if grep -q "registry-mirrors" /etc/docker/daemon.json; then
+                # 使用jq更新镜像（如果安装了jq）
+                if command -v jq &> /dev/null; then
+                    tmp_file=$(mktemp)
+                    jq --arg mirror "$mirror_url" '.["registry-mirrors"] = [$mirror]' /etc/docker/daemon.json > "$tmp_file"
+                    mv "$tmp_file" /etc/docker/daemon.json
+                else
+                    # 简单的sed替换（不够健壮，但对简单配置有效）
+                    sed -i "s|\"registry-mirrors\":\s*\[[^]]*\]|\"registry-mirrors\": [\"$mirror_url\"]|g" /etc/docker/daemon.json
+                fi
+            else
+                # 需要添加registry-mirrors字段
+                if command -v jq &> /dev/null; then
+                    tmp_file=$(mktemp)
+                    jq --arg mirror "$mirror_url" '. + {"registry-mirrors": [$mirror]}' /etc/docker/daemon.json > "$tmp_file"
+                    mv "$tmp_file" /etc/docker/daemon.json
+                else
+                    # 为文件添加字段（简单但不完全健壮的方法）
+                    # 检查文件是否为空或只有{}
+                    if [ ! -s /etc/docker/daemon.json ] || [ "$(cat /etc/docker/daemon.json)" = "{}" ]; then
+                        echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /etc/docker/daemon.json
+                    else
+                        # 在结束的}前添加
+                        sed -i "s|}|\t\"registry-mirrors\": [\"$mirror_url\"]\n}|" /etc/docker/daemon.json
+                    fi
+                fi
+            fi
+        else
+            # 创建新文件
+            echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /etc/docker/daemon.json
+        fi
+        
+        # 重启Docker服务
+        echo -e "${YELLOW}正在应用配置并重启Docker服务...${NC}"
+        show_loading "正在重启Docker" 3
+        systemctl restart docker
+        echo -e "${GREEN}已配置Docker镜像加速并重启Docker服务${NC}"
+        echo -e "${GREEN}镜像加速地址: ${mirror_url}${NC}"
+    fi
+}
+
 # UFW Docker 配置函数
 configure_ufw_docker() {
     echo "正在配置 UFW Docker 规则..."
@@ -1287,6 +1517,7 @@ open_docker_port() {
             ;;
     esac
 }
+
 
 # Docker 容器信息展示函数
 show_docker_container_info() {
@@ -1384,6 +1615,187 @@ ${BLUE}┃${NC}  ${GREEN}块 I/O:${NC} {{.BlockIO}}")
     docker system df | awk '{print "'"${BLUE}"'┃'"${NC}"' " $0}' | format_docker_output
     
     show_footer
+}
+
+# 容器管理函数
+manage_containers() {
+    while true; do
+        clear_screen
+        show_header "Docker 容器管理"
+        
+        # 检查是否安装了 Docker
+        if ! command -v docker &> /dev/null; then
+            echo -e "${BLUE}┃${NC} ${RED}Docker 未安装，无法管理容器${NC}"
+            show_footer
+            return 1
+        fi
+        
+        # 检查 Docker 服务是否正常运行
+        if ! docker info &> /dev/null; then
+            echo -e "${BLUE}┃${NC} ${RED}Docker 服务未正常运行${NC}"
+            show_footer
+            return 1
+        fi
+        
+        # 显示容器列表
+        echo -e "${BLUE}┃${NC} ${BOLD}容器列表${NC}"
+        echo -e "${BLUE}┃${NC}"
+        
+        # 手动打印标题行
+        printf "${BLUE}┃${NC} %-12s %-25s %-40s %-s\n" "CONTAINER ID" "NAMES" "IMAGE" "STATUS"
+        
+        # 使用printf精确控制列宽和对齐
+        container_count=0
+        container_ids=()
+        container_names=()
+        
+        while IFS='|' read -r id name image status; do
+            if [ -n "$id" ]; then
+                container_count=$((container_count + 1))
+                container_ids+=("$id")
+                container_names+=("$name")
+                
+                # 使用短ID (前12个字符)
+                short_id="${id:0:12}"
+                printf "${BLUE}┃${NC} %-12s %-25s %-40s %-s\n" "$short_id" "$name" "$image" "$status"
+            fi
+        done < <(docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}")
+        
+        # 如果没有容器，显示提示
+        if [ $container_count -eq 0 ]; then
+            echo -e "${BLUE}┃${NC} ${YELLOW}当前没有任何容器${NC}"
+        fi
+        
+        echo -e "${BLUE}┃${NC}"
+        echo -e "${BLUE}┣━━ ${BOLD}容器操作${NC}"
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "1" "启动容器"
+        show_menu_item "2" "停止容器"
+        show_menu_item "3" "重启容器"
+        show_menu_item "4" "暂停容器"
+        show_menu_item "5" "恢复容器"
+        show_menu_item "6" "删除容器"
+        echo -e "${BLUE}┃${NC}"
+        show_menu_item "0" "返回上级菜单"
+        
+        show_footer
+        
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-6]: "${NC})" choice
+        
+        case $choice in
+            0) return ;;
+            [1-6]) 
+                if [ $container_count -eq 0 ]; then
+                    echo -e "${YELLOW}当前没有容器可操作${NC}"
+                    read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
+                    continue
+                fi
+                
+                # 选择目标容器
+                echo -e "${BLUE}┃${NC}"
+                echo -e "${BLUE}┣━━ ${BOLD}请选择要操作的容器:${NC}"
+                echo -e "${BLUE}┃${NC}"
+
+                # 使用颜色交替显示容器
+                for i in $(seq 0 $((container_count-1))); do
+                    # 交替使用不同的颜色显示
+                    if [ $((i % 2)) -eq 0 ]; then
+                        echo -e "${BLUE}┃${NC} ${GREEN}$((i+1))${NC}) ${container_names[$i]} (${container_ids[$i]:0:12})"
+                    else
+                        echo -e "${BLUE}┃${NC} ${YELLOW}$((i+1))${NC}) ${container_names[$i]} (${container_ids[$i]:0:12})"
+                    fi
+                done
+
+                echo -e "${BLUE}┃${NC}"
+                echo -e "${BLUE}┃${NC} ${RED}0${NC}) 取消操作"
+                
+                # 读取用户选择的容器
+                read -p "$(echo -e ${YELLOW}"请输入容器序号 [0-$container_count]: "${NC})" container_choice
+                
+                # 检查用户输入是否有效
+                if ! [[ "$container_choice" =~ ^[0-9]+$ ]] || [ "$container_choice" -lt 0 ] || [ "$container_choice" -gt $container_count ]; then
+                    echo -e "${RED}无效的选择${NC}"
+                elif [ "$container_choice" -eq 0 ]; then
+                    # 用户取消操作
+                    continue
+                else
+                    # 获取用户选择的容器ID
+                    selected_idx=$((container_choice-1))
+                    target_container="${container_ids[$selected_idx]}"
+                    target_name="${container_names[$selected_idx]}"
+                    
+                    # 执行对应操作
+                    case $choice in
+                        1) # 启动容器
+                            echo -e "${YELLOW}正在启动容器 ${target_name}...${NC}"
+                            docker start "$target_container"
+                            if [ $? -eq 0 ]; then
+                                echo -e "${GREEN}容器已启动成功${NC}"
+                            else
+                                echo -e "${RED}容器启动失败${NC}"
+                            fi
+                            ;;
+                        2) # 停止容器
+                            echo -e "${YELLOW}正在停止容器 ${target_name}...${NC}"
+                            docker stop "$target_container"
+                            if [ $? -eq 0 ]; then
+                                echo -e "${GREEN}容器已停止成功${NC}"
+                            else
+                                echo -e "${RED}容器停止失败${NC}"
+                            fi
+                            ;;
+                        3) # 重启容器
+                            echo -e "${YELLOW}正在重启容器 ${target_name}...${NC}"
+                            docker restart "$target_container"
+                            if [ $? -eq 0 ]; then
+                                echo -e "${GREEN}容器已重启成功${NC}"
+                            else
+                                echo -e "${RED}容器重启失败${NC}"
+                            fi
+                            ;;
+                        4) # 暂停容器
+                            echo -e "${YELLOW}正在暂停容器 ${target_name}...${NC}"
+                            docker pause "$target_container"
+                            if [ $? -eq 0 ]; then
+                                echo -e "${GREEN}容器已暂停成功${NC}"
+                            else
+                                echo -e "${RED}容器暂停失败${NC}"
+                            fi
+                            ;;
+                        5) # 恢复容器
+                            echo -e "${YELLOW}正在恢复容器 ${target_name}...${NC}"
+                            docker unpause "$target_container"
+                            if [ $? -eq 0 ]; then
+                                echo -e "${GREEN}容器已恢复成功${NC}"
+                            else
+                                echo -e "${RED}容器恢复失败${NC}"
+                            fi
+                            ;;
+                        6) # 删除容器
+                            echo -e "${RED}警告: 此操作将删除容器 ${target_name}${NC}"
+                            read -p "$(echo -e ${YELLOW}"确认删除吗? [y/N]: "${NC})" confirm
+                            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                                echo -e "${YELLOW}正在删除容器...${NC}"
+                                docker rm -f "$target_container"
+                                if [ $? -eq 0 ]; then
+                                    echo -e "${GREEN}容器已删除成功${NC}"
+                                else
+                                    echo -e "${RED}容器删除失败${NC}"
+                                fi
+                            else
+                                echo -e "${YELLOW}已取消删除操作${NC}"
+                            fi
+                            ;;
+                    esac
+                fi
+                ;;
+            *)
+                echo -e "${RED}无效的选择${NC}"
+                ;;
+        esac
+        
+        read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
+    done
 }
 
 # 删除未使用的 Docker 资源
@@ -2405,32 +2817,36 @@ docker_menu() {
         echo -e "${BLUE}┃${NC} ${BOLD}基础配置${NC}"
         show_menu_item "1" "安装 Docker"
         show_menu_item "2" "安装 Docker Compose"
+        show_menu_item "3" "配置镜像加速"
         
         echo -e "${BLUE}┃${NC}"
         echo -e "${BLUE}┣━━ ${BOLD}网络配置${NC}"
-        show_menu_item "3" "配置 UFW Docker 规则"
-        show_menu_item "4" "开放 Docker 端口"
+        show_menu_item "4" "配置 UFW Docker 规则"
+        show_menu_item "5" "开放 Docker 端口"
         
         echo -e "${BLUE}┃${NC}"
         echo -e "${BLUE}┣━━ ${BOLD}系统管理${NC}"
-        show_menu_item "5" "查看 Docker 容器信息"
-        show_menu_item "6" "清理 Docker 资源"
-        show_menu_item "7" "查看 Docker 网络信息"
+        show_menu_item "6" "查看 Docker 容器信息"
+        show_menu_item "7" "容器管理(启动/停止/重启/删除)"
+        show_menu_item "8" "清理 Docker 资源"
+        show_menu_item "9" "查看 Docker 网络信息"
         
         echo -e "${BLUE}┃${NC}"
         show_menu_item "0" "返回主菜单"
         
         show_footer
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-7]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-9]: "${NC})" choice
         case $choice in
             1) install_docker ;;
             2) install_docker_compose ;;
-            3) configure_ufw_docker ;;
-            4) open_docker_port ;;
-            5) show_docker_container_info ;;
-            6) clean_docker_resources ;;
-            7) show_docker_networks ;;
+            3) configure_docker_mirror ;;
+            4) configure_ufw_docker ;;
+            5) open_docker_port ;;
+            6) show_docker_container_info ;;
+            7) manage_containers ;;
+            8) clean_docker_resources ;;
+            9) show_docker_networks ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
