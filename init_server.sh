@@ -1219,12 +1219,12 @@ install_docker_compose() {
 # 添加进度条/等待提示函数
 show_loading() {
     local message="$1"
-    local duration=${2:-20}  # 默认等待20秒
+    local duration=${2:-8}  # 默认等待40秒
     local i=0
     
     echo -ne "${YELLOW}$message "
     while [ $i -lt $duration ]; do
-        for s in / - \\ \|; do
+        for s in / - \\ \|; do  
             echo -ne "\b$s"
             sleep 0.25
         done
@@ -1246,17 +1246,7 @@ configure_docker_mirror() {
         return 1
     fi
     
-    echo -e "${BLUE}┃${NC} ${BOLD}可用的镜像加速服务${NC}"
-    echo -e "${BLUE}┃${NC}"
-    echo -e "${BLUE}┃${NC} 1) 阿里云镜像加速"
-    echo -e "${BLUE}┃${NC} 2) 腾讯云镜像加速"
-    echo -e "${BLUE}┃${NC} 3) 华为云镜像加速"
-    echo -e "${BLUE}┃${NC} 4) 中科大镜像加速"
-    echo -e "${BLUE}┃${NC} 5) 网易云镜像加速"
-    echo -e "${BLUE}┃${NC} 6) Docker中国官方镜像加速"
-    echo -e "${BLUE}┃${NC} 7) 自定义镜像加速地址"
-    echo -e "${BLUE}┃${NC} 8) 删除镜像加速配置"
-    echo -e "${BLUE}┃${NC} 0) 返回上级菜单"
+    echo -e "${BLUE}┃${NC} ${BOLD}Docker 镜像加速配置${NC}"
     echo -e "${BLUE}┃${NC}"
     
     # 检查当前配置
@@ -1278,32 +1268,111 @@ configure_docker_mirror() {
         echo -e "${BLUE}┃${NC}"
     else
         echo -e "${BLUE}┃${NC} ${YELLOW}当前未配置镜像加速${NC}"
+        echo -e "${BLUE}┃${NC}"
     fi
     
+    echo -e "${BLUE}┃${NC} 1) 配置镜像加速"
+    echo -e "${BLUE}┃${NC} 2) 删除镜像加速配置"
+    echo -e "${BLUE}┃${NC} 0) 返回上级菜单"
     echo -e "${BLUE}┃${NC}"
-    show_footer
     
-    read -p "$(echo -e ${YELLOW}"请选择镜像加速服务 [0-8]: "${NC})" choice
+    read -p "$(echo -e ${BLUE}"┃${NC} "${YELLOW}"请选择操作 [0-2]: "${NC})" choice
     
-    # 根据用户选择设置镜像
-    mirror_url=""
     case $choice in
-        1) mirror_url="https://your-id.mirror.aliyuncs.com" ;;
-        2) mirror_url="https://mirror.ccs.tencentyun.com" ;;
-        3) mirror_url="https://your-id.mirror.swr.myhuaweicloud.com" ;;
-        4) mirror_url="https://docker.mirrors.ustc.edu.cn" ;;
-        5) mirror_url="https://hub-mirror.c.163.com" ;;
-        6) mirror_url="https://registry.docker-cn.com" ;;
-        7)
-            read -p "$(echo -e ${YELLOW}"请输入自定义镜像加速地址: "${NC})" custom_url
-            if [ -n "$custom_url" ]; then
-                mirror_url="$custom_url"
-            else
-                echo -e "${RED}未提供有效的镜像地址${NC}"
+        1)
+            echo -e "${BLUE}┃${NC}"
+            echo -e "${BLUE}┃${NC} 请输入您要使用的 Docker 镜像加速地址:"
+            read -p "$(echo -e ${BLUE}"┃${NC} "${YELLOW}"> "${NC})" mirror_url
+            
+            if [ -z "$mirror_url" ]; then
+                echo -e "${BLUE}┃${NC} ${RED}未提供镜像加速地址，操作取消${NC}"
+                show_footer
                 return 1
             fi
+            
+            # 创建或更新daemon.json文件
+            mkdir -p /etc/docker
+            
+            # 测试镜像配置开始
+            echo -e "${BLUE}┃${NC} ${YELLOW}正在测试镜像地址有效性...${NC}"
+            # 创建临时配置文件
+            echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /tmp/test_daemon.json
+
+            # 临时备份当前配置
+            if [ -f "/etc/docker/daemon.json" ]; then
+                cp /etc/docker/daemon.json /etc/docker/daemon.json.tmp
+            fi
+
+            # 应用测试配置
+            cp /tmp/test_daemon.json /etc/docker/daemon.json
+
+            # 测试Docker是否能启动
+            show_loading "测试镜像配置" 30
+            if ! systemctl restart docker; then
+                echo -e "${BLUE}┃${NC} ${RED}使用此镜像地址无法启动Docker，可能是镜像地址无效${NC}"
+                echo -e "${BLUE}┃${NC} ${YELLOW}正在恢复原配置...${NC}"
+                # 恢复原配置
+                if [ -f "/etc/docker/daemon.json.tmp" ]; then
+                    cp /etc/docker/daemon.json.tmp /etc/docker/daemon.json
+                    rm /etc/docker/daemon.json.tmp
+                    show_loading "恢复原配置" 3
+                    systemctl restart docker
+                fi
+                show_footer
+                return 1
+            fi
+
+            # 如果成功，清理临时文件
+            if [ -f "/etc/docker/daemon.json.tmp" ]; then
+                rm /etc/docker/daemon.json.tmp
+            fi
+            echo -e "${BLUE}┃${NC} ${GREEN}镜像地址测试通过!${NC}"
+            
+            if [ -f "/etc/docker/daemon.json" ]; then
+                # 创建备份
+                cp /etc/docker/daemon.json /etc/docker/daemon.json.bak.$(date +%Y%m%d%H%M%S)
+                
+                # 检查是否已有registry-mirrors配置
+                if grep -q "registry-mirrors" /etc/docker/daemon.json; then
+                    # 使用jq更新镜像（如果安装了jq）
+                    if command -v jq &> /dev/null; then
+                        tmp_file=$(mktemp)
+                        jq --arg mirror "$mirror_url" '.["registry-mirrors"] = [$mirror]' /etc/docker/daemon.json > "$tmp_file"
+                        mv "$tmp_file" /etc/docker/daemon.json
+                    else
+                        # 简单的sed替换（不够健壮，但对简单配置有效）
+                        sed -i "s|\"registry-mirrors\":\s*\[[^]]*\]|\"registry-mirrors\": [\"$mirror_url\"]|g" /etc/docker/daemon.json
+                    fi
+                else
+                    # 需要添加registry-mirrors字段
+                    if command -v jq &> /dev/null; then
+                        tmp_file=$(mktemp)
+                        jq --arg mirror "$mirror_url" '. + {"registry-mirrors": [$mirror]}' /etc/docker/daemon.json > "$tmp_file"
+                        mv "$tmp_file" /etc/docker/daemon.json
+                    else
+                        # 为文件添加字段（简单但不完全健壮的方法）
+                        # 检查文件是否为空或只有{}
+                        if [ ! -s /etc/docker/daemon.json ] || [ "$(cat /etc/docker/daemon.json)" = "{}" ]; then
+                            echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /etc/docker/daemon.json
+                        else
+                            # 在结束的}前添加
+                            sed -i "s|}|\t\"registry-mirrors\": [\"$mirror_url\"]\n}|" /etc/docker/daemon.json
+                        fi
+                    fi
+                fi
+            else
+                # 创建新文件
+                echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /etc/docker/daemon.json
+            fi
+            
+            # 重启Docker服务
+            echo -e "${BLUE}┃${NC} ${YELLOW}正在应用配置并重启Docker服务...${NC}"
+            show_loading "正在重启Docker" 30
+            systemctl restart docker
+            echo -e "${BLUE}┃${NC} ${GREEN}已配置Docker镜像加速并重启Docker服务${NC}"
+            echo -e "${BLUE}┃${NC} ${GREEN}镜像加速地址: ${mirror_url}${NC}"
             ;;
-        8)
+        2)
             # 删除镜像加速配置
             if [ -f "/etc/docker/daemon.json" ]; then
                 # 创建备份
@@ -1313,137 +1382,32 @@ configure_docker_mirror() {
                 echo '{}' > /etc/docker/daemon.json
                 
                 # 重启Docker服务
-                echo -e "${YELLOW}正在重启Docker服务...${NC}"
+                echo -e "${BLUE}┃${NC} ${YELLOW}正在重启Docker服务...${NC}"
                 show_loading "等待Docker服务重启" 5
                 
                 if systemctl restart docker; then
-                    echo -e "${GREEN}已删除镜像加速配置并重启Docker服务${NC}"
+                    echo -e "${BLUE}┃${NC} ${GREEN}已删除镜像加速配置并重启Docker服务${NC}"
                 else
-                    echo -e "${RED}Docker服务重启失败，恢复备份...${NC}"
+                    echo -e "${BLUE}┃${NC} ${RED}Docker服务重启失败，恢复备份...${NC}"
                     # 恢复最近的备份
                     cp "$(ls -t /etc/docker/daemon.json.bak.* | head -1)" /etc/docker/daemon.json
                     show_loading "正在恢复原配置" 3
                     systemctl restart docker
-                    echo -e "${YELLOW}已恢复备份${NC}"
+                    echo -e "${BLUE}┃${NC} ${YELLOW}已恢复备份${NC}"
                 fi
             else
-                echo -e "${YELLOW}未发现镜像加速配置${NC}"
+                echo -e "${BLUE}┃${NC} ${YELLOW}未发现镜像加速配置${NC}"
             fi
-            return
             ;;
-        0) return ;;
+        0) 
+            # 返回上级菜单
+            ;;
         *) 
-            echo -e "${RED}无效的选择${NC}"
-            return 1
+            echo -e "${BLUE}┃${NC} ${RED}无效的选择${NC}"
             ;;
     esac
     
-    # 为阿里云和华为云显示说明信息
-    if [ "$choice" == "1" ]; then
-        echo -e "${YELLOW}注意: 阿里云镜像加速需要登录阿里云获取专属地址${NC}"
-        echo -e "${YELLOW}请访问 https://cr.console.aliyun.com/ 获取您的专属镜像加速地址${NC}"
-        read -p "$(echo -e ${YELLOW}"请输入您的阿里云镜像专属地址: "${NC})" ali_url
-        if [ -n "$ali_url" ]; then
-            mirror_url="$ali_url"
-        else
-            echo -e "${RED}未提供有效的阿里云镜像地址${NC}"
-            return 1
-        fi
-    elif [ "$choice" == "3" ]; then
-        echo -e "${YELLOW}注意: 华为云镜像加速需要登录华为云获取专属地址${NC}"
-        echo -e "${YELLOW}请访问华为云 SWR 控制台获取您的专属镜像加速地址${NC}"
-        read -p "$(echo -e ${YELLOW}"请输入您的华为云镜像专属地址: "${NC})" huawei_url
-        if [ -n "$huawei_url" ]; then
-            mirror_url="$huawei_url"
-        else
-            echo -e "${RED}未提供有效的华为云镜像地址${NC}"
-            return 1
-        fi
-    fi
-    
-    # 创建或更新daemon.json文件
-    if [ -n "$mirror_url" ]; then
-        mkdir -p /etc/docker
-        
-        # 测试镜像配置开始
-        echo -e "${YELLOW}正在测试镜像地址有效性...${NC}"
-        # 创建临时配置文件
-        echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /tmp/test_daemon.json
-
-        # 临时备份当前配置
-        if [ -f "/etc/docker/daemon.json" ]; then
-            cp /etc/docker/daemon.json /etc/docker/daemon.json.tmp
-        fi
-
-        # 应用测试配置
-        cp /tmp/test_daemon.json /etc/docker/daemon.json
-
-        # 测试Docker是否能启动
-        show_loading "测试镜像配置" 5
-        if ! systemctl restart docker; then
-            echo -e "${RED}使用此镜像地址无法启动Docker，可能是镜像地址无效${NC}"
-            echo -e "${YELLOW}正在恢复原配置...${NC}"
-            # 恢复原配置
-            if [ -f "/etc/docker/daemon.json.tmp" ]; then
-                cp /etc/docker/daemon.json.tmp /etc/docker/daemon.json
-                rm /etc/docker/daemon.json.tmp
-                show_loading "恢复原配置" 3
-                systemctl restart docker
-            fi
-            return 1
-        fi
-
-        # 如果成功，清理临时文件
-        if [ -f "/etc/docker/daemon.json.tmp" ]; then
-            rm /etc/docker/daemon.json.tmp
-        fi
-        echo -e "${GREEN}镜像地址测试通过!${NC}"
-        # 测试镜像配置结束
-        
-        if [ -f "/etc/docker/daemon.json" ]; then
-            # 创建备份
-            cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
-            
-            # 检查是否已有registry-mirrors配置
-            if grep -q "registry-mirrors" /etc/docker/daemon.json; then
-                # 使用jq更新镜像（如果安装了jq）
-                if command -v jq &> /dev/null; then
-                    tmp_file=$(mktemp)
-                    jq --arg mirror "$mirror_url" '.["registry-mirrors"] = [$mirror]' /etc/docker/daemon.json > "$tmp_file"
-                    mv "$tmp_file" /etc/docker/daemon.json
-                else
-                    # 简单的sed替换（不够健壮，但对简单配置有效）
-                    sed -i "s|\"registry-mirrors\":\s*\[[^]]*\]|\"registry-mirrors\": [\"$mirror_url\"]|g" /etc/docker/daemon.json
-                fi
-            else
-                # 需要添加registry-mirrors字段
-                if command -v jq &> /dev/null; then
-                    tmp_file=$(mktemp)
-                    jq --arg mirror "$mirror_url" '. + {"registry-mirrors": [$mirror]}' /etc/docker/daemon.json > "$tmp_file"
-                    mv "$tmp_file" /etc/docker/daemon.json
-                else
-                    # 为文件添加字段（简单但不完全健壮的方法）
-                    # 检查文件是否为空或只有{}
-                    if [ ! -s /etc/docker/daemon.json ] || [ "$(cat /etc/docker/daemon.json)" = "{}" ]; then
-                        echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /etc/docker/daemon.json
-                    else
-                        # 在结束的}前添加
-                        sed -i "s|}|\t\"registry-mirrors\": [\"$mirror_url\"]\n}|" /etc/docker/daemon.json
-                    fi
-                fi
-            fi
-        else
-            # 创建新文件
-            echo "{\"registry-mirrors\": [\"$mirror_url\"]}" > /etc/docker/daemon.json
-        fi
-        
-        # 重启Docker服务
-        echo -e "${YELLOW}正在应用配置并重启Docker服务...${NC}"
-        show_loading "正在重启Docker" 3
-        systemctl restart docker
-        echo -e "${GREEN}已配置Docker镜像加速并重启Docker服务${NC}"
-        echo -e "${GREEN}镜像加速地址: ${mirror_url}${NC}"
-    fi
+    show_footer
 }
 
 # UFW Docker 配置函数
