@@ -2058,7 +2058,7 @@ adjust_swappiness() {
 install_1panel() {
     read -p "是否安装1Panel? (y/n): " answer
     if [ "$answer" = "y" ]; then
-        curl -sSL https://resource.fit2cloud.com/1panel/package/quick_start.sh -o quick_start.sh && bash quick_start.sh
+        curl -sSL https://resource.fit2cloud.com/1panel/package/v2/quick_start.sh -o quick_start.sh && bash quick_start.sh
     fi
 }
 
