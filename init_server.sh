@@ -1305,8 +1305,6 @@ check_fail2ban_status() {
     # 各监狱详细状态
     echo -e "${BOLD} 📋 监狱详情${NC}"
     echo -e "${BLUE}──────────────────────────────────────────────────────────────────────${NC}"
-    printf " ${BOLD}%-20s  %-10s  %-10s  %-10s  %s${NC}\n" "监狱名" "当前封禁" "总封禁" "当前失败" "总失败"
-    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────${NC}"
     
     # 遍历每个监狱
     for jail in $(echo "$jails" | tr ',' ' '); do
@@ -1319,12 +1317,24 @@ check_fail2ban_status() {
         local cur_failed=$(echo "$status" | grep "Currently failed" | awk '{print $NF}')
         local total_failed=$(echo "$status" | grep "Total failed" | awk '{print $NF}')
         
+        # 从配置文件获取 jail 配置
+        local jail_port=$(grep -A 10 "^\[$jail\]" /etc/fail2ban/jail.local 2>/dev/null | grep "^port" | head -1 | awk -F'=' '{print $2}' | xargs)
+        local jail_maxretry=$(grep -A 10 "^\[$jail\]" /etc/fail2ban/jail.local 2>/dev/null | grep "^maxretry" | head -1 | awk -F'=' '{print $2}' | xargs)
+        local jail_bantime=$(grep -A 10 "^\[$jail\]" /etc/fail2ban/jail.local 2>/dev/null | grep "^bantime" | head -1 | awk -F'=' '{print $2}' | xargs)
+        local jail_findtime=$(grep -A 10 "^\[$jail\]" /etc/fail2ban/jail.local 2>/dev/null | grep "^findtime" | head -1 | awk -F'=' '{print $2}' | xargs)
+        
         # 颜色标记当前封禁
         local ban_color="${NC}"
         [ "${cur_banned:-0}" -gt 0 ] && ban_color="${RED}"
         
-        printf " %-20s  ${ban_color}%-10s${NC}  %-10s  %-10s  %s\n" \
-            "$jail" "${cur_banned:-0}" "${total_banned:-0}" "${cur_failed:-0}" "${total_failed:-0}"
+        # bantime 显示
+        local bantime_display="${jail_bantime:-默认}"
+        [ "$jail_bantime" == "-1" ] && bantime_display="永久"
+        
+        echo -e " ${CYAN}[$jail]${NC}"
+        echo -e "   端口: ${jail_port:-ssh}   最大重试: ${jail_maxretry:-5}次   封禁时间: ${bantime_display}   检测周期: ${jail_findtime:-600}秒"
+        echo -e "   当前封禁: ${ban_color}${cur_banned:-0}${NC}   总封禁: ${total_banned:-0}   当前失败: ${cur_failed:-0}   总失败: ${total_failed:-0}"
+        echo ""
     done
     
     echo ""
