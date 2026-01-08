@@ -2,9 +2,9 @@
 
 # ============================================
 # 服务器配置管理系统
-# 版本: 1.2.0
+# 版本: 1.3.0
 # ============================================
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 # 设置脚本选项增强健壮性
 set -o pipefail
@@ -172,11 +172,15 @@ show_dashboard() {
     get_progress_bar "$cpu_usage"
     echo ""
     
-    # 内存使用
-    local mem_used=$(free -m 2>/dev/null | awk '/Mem:/ {print $3}')
-    local mem_total=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')
+    # 内存使用 - 使用更健壮的解析方式兼容不同系统
+    local mem_info=$(free -m 2>/dev/null | awk '/Mem:/ {print $2, $3}')
+    local mem_total=$(echo "$mem_info" | awk '{print $1}')
+    local mem_used=$(echo "$mem_info" | awk '{print $2}')
+    # 确保值为数字
+    [[ ! "$mem_total" =~ ^[0-9]+$ ]] && mem_total=0
+    [[ ! "$mem_used" =~ ^[0-9]+$ ]] && mem_used=0
     local mem_percent=0
-    [ -n "$mem_total" ] && [ "$mem_total" -gt 0 ] && mem_percent=$((mem_used * 100 / mem_total))
+    [ "$mem_total" -gt 0 ] && mem_percent=$((mem_used * 100 / mem_total))
     echo -en " ${YELLOW}内存:${NC} "
     get_progress_bar "$mem_percent"
     echo -e " ${DIM}${mem_used}/${mem_total}MB${NC}"
@@ -498,6 +502,32 @@ install_ufw() {
     fi
 }
 
+# 卸载 UFW
+uninstall_ufw() {
+    if ! command -v ufw &> /dev/null; then
+        echo -e "${YELLOW}UFW 未安装${NC}"
+        return 0
+    fi
+    
+    echo -e "${RED}警告: 卸载 UFW 将移除所有防火墙规则！${NC}"
+    read -p "确定要卸载 UFW 吗? (输入 yes 确认): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo -e "${YELLOW}已取消卸载${NC}"
+        return 0
+    fi
+    
+    echo -e "${BLUE}正在禁用并卸载 UFW...${NC}"
+    ufw --force disable 2>/dev/null
+    apt purge ufw -y && apt autoremove -y
+    
+    if ! command -v ufw &> /dev/null; then
+        success_msg "UFW 已成功卸载"
+    else
+        echo -e "${RED}卸载失败${NC}"
+        return 1
+    fi
+}
+
 configure_ufw() {
     if ! command -v ufw &> /dev/null; then
         echo -e "${RED}请先安装UFW${NC}"
@@ -713,8 +743,6 @@ batch_delete_ufw_rules() {
     echo -e "${BLUE}当前UFW规则:${NC}"
     echo ""
     
-    # 获取并显示所有规则
-    ufw status numbered | grep -v "Status:"
     # 使用更灵活的正则表达式匹配带编号的规则
     mapfile -t rules < <(ufw status numbered | grep -E '^\[[ 0-9]+\]')
     
@@ -724,18 +752,23 @@ batch_delete_ufw_rules() {
         return
     fi
     
-    # 显示规则列表
+    # 显示规则列表（带颜色格式化）
+    echo -e "${BOLD}     端口/协议                    动作        来源${NC}"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────${NC}"
     for i in "${!rules[@]}"; do
-        echo -e "${GREEN}$((i+1))${NC}: ${rules[$i]}"
+        echo -e " ${rules[$i]}"
     done
+    echo -e "${BLUE}──────────────────────────────────────────────────────────${NC}"
+    echo -e " ${DIM}共 ${#rules[@]} 条规则${NC}"
     
     echo ""
     echo -e "${YELLOW}删除选项:${NC}"
-    echo "1. 按范围删除规则"
+    echo "1. 按范围删除规则 (从大到小安全删除)"
     echo "2. 按规则号删除多条规则"
+    echo "3. 按规则内容删除 (最安全)"
     echo "0. 返回"
     
-    read -p "选择操作 [0-2]: " delete_choice
+    read -p "选择操作 [0-3]: " delete_choice
     
     case $delete_choice in
         1)
@@ -816,6 +849,133 @@ batch_delete_ufw_rules() {
             else
                 echo -e "${YELLOW}操作已取消${NC}"
             fi
+            ;;
+        
+        3)
+            # 按规则内容删除 - 最安全的方式
+            echo -e "${CYAN}按规则内容删除 (输入规则的关键信息)${NC}"
+            echo -e "${DIM}示例: 删除所有来自 103.21.244.0/22 的规则${NC}"
+            echo ""
+            echo -e "1. 删除包含特定IP/网段的所有规则"
+            echo -e "2. 删除特定端口的所有规则"
+            echo -e "3. 删除特定端口+IP组合的规则"
+            echo -e "0. 返回"
+            
+            read -p "选择删除类型 [0-3]: " content_choice
+            
+            case $content_choice in
+                1)
+                    read -p "输入要删除的IP或网段 (例如: 103.21.244.0/22): " target_ip
+                    if [ -z "$target_ip" ]; then
+                        echo -e "${RED}未输入IP${NC}"
+                        return 1
+                    fi
+                    
+                    # 查找匹配的规则
+                    echo -e "\n${YELLOW}找到以下匹配规则:${NC}"
+                    local match_count=0
+                    for rule in "${rules[@]}"; do
+                        if echo "$rule" | grep -q "$target_ip"; then
+                            echo -e " ${rule}"
+                            ((match_count++))
+                        fi
+                    done
+                    
+                    if [ "$match_count" -eq 0 ]; then
+                        echo -e "${YELLOW}未找到匹配的规则${NC}"
+                        return 0
+                    fi
+                    
+                    echo -e "\n${RED}将删除以上 $match_count 条规则${NC}"
+                    read -p "确认删除? (y/n): " confirm
+                    
+                    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        # 从后向前遍历删除
+                        for ((i=${#rules[@]}-1; i>=0; i--)); do
+                            if echo "${rules[$i]}" | grep -q "$target_ip"; then
+                                local rule_num=$(echo "${rules[$i]}" | grep -oE '^\[[ ]*([0-9]+)\]' | tr -d '[]' | tr -d ' ')
+                                echo -e "${YELLOW}删除: ${rules[$i]}${NC}"
+                                yes | ufw delete "$rule_num"
+                            fi
+                        done
+                        echo -e "${GREEN}删除完成${NC}"
+                    fi
+                    ;;
+                2)
+                    read -p "输入要删除的端口 (例如: 80 或 80/tcp): " target_port
+                    if [ -z "$target_port" ]; then
+                        echo -e "${RED}未输入端口${NC}"
+                        return 1
+                    fi
+                    
+                    echo -e "\n${YELLOW}找到以下匹配规则:${NC}"
+                    local match_count=0
+                    for rule in "${rules[@]}"; do
+                        if echo "$rule" | grep -qE "^\\[[ 0-9]+\\] ${target_port}[^0-9]|^\\[[ 0-9]+\\] ${target_port}\$"; then
+                            echo -e " ${rule}"
+                            ((match_count++))
+                        fi
+                    done
+                    
+                    if [ "$match_count" -eq 0 ]; then
+                        echo -e "${YELLOW}未找到匹配的规则${NC}"
+                        return 0
+                    fi
+                    
+                    echo -e "\n${RED}将删除以上 $match_count 条规则${NC}"
+                    read -p "确认删除? (y/n): " confirm
+                    
+                    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        for ((i=${#rules[@]}-1; i>=0; i--)); do
+                            if echo "${rules[$i]}" | grep -qE "^\\[[ 0-9]+\\] ${target_port}[^0-9]|^\\[[ 0-9]+\\] ${target_port}\$"; then
+                                local rule_num=$(echo "${rules[$i]}" | grep -oE '^\[[ ]*([0-9]+)\]' | tr -d '[]' | tr -d ' ')
+                                echo -e "${YELLOW}删除: ${rules[$i]}${NC}"
+                                yes | ufw delete "$rule_num"
+                            fi
+                        done
+                        echo -e "${GREEN}删除完成${NC}"
+                    fi
+                    ;;
+                3)
+                    read -p "输入端口 (例如: 80/tcp): " target_port
+                    read -p "输入来源IP/网段 (例如: 103.21.244.0/22): " target_ip
+                    
+                    if [ -z "$target_port" ] || [ -z "$target_ip" ]; then
+                        echo -e "${RED}端口和IP都需要输入${NC}"
+                        return 1
+                    fi
+                    
+                    echo -e "\n${YELLOW}找到以下匹配规则:${NC}"
+                    local match_count=0
+                    for rule in "${rules[@]}"; do
+                        if echo "$rule" | grep -q "$target_port" && echo "$rule" | grep -q "$target_ip"; then
+                            echo -e " ${rule}"
+                            ((match_count++))
+                        fi
+                    done
+                    
+                    if [ "$match_count" -eq 0 ]; then
+                        echo -e "${YELLOW}未找到匹配的规则${NC}"
+                        return 0
+                    fi
+                    
+                    echo -e "\n${RED}将删除以上 $match_count 条规则${NC}"
+                    read -p "确认删除? (y/n): " confirm
+                    
+                    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        for ((i=${#rules[@]}-1; i>=0; i--)); do
+                            if echo "${rules[$i]}" | grep -q "$target_port" && echo "${rules[$i]}" | grep -q "$target_ip"; then
+                                local rule_num=$(echo "${rules[$i]}" | grep -oE '^\[[ ]*([0-9]+)\]' | tr -d '[]' | tr -d ' ')
+                                echo -e "${YELLOW}删除: ${rules[$i]}${NC}"
+                                yes | ufw delete "$rule_num"
+                            fi
+                        done
+                        echo -e "${GREEN}删除完成${NC}"
+                    fi
+                    ;;
+                0) return ;;
+                *) echo -e "${RED}无效的选择${NC}" ;;
+            esac
             ;;
             
         0)
@@ -1158,6 +1318,36 @@ install_fail2ban() {
     success_msg "Fail2ban 安装完成"
 }
 
+# 卸载 Fail2ban
+uninstall_fail2ban() {
+    if ! command -v fail2ban-client &> /dev/null; then
+        echo -e "${YELLOW}Fail2ban 未安装${NC}"
+        return 0
+    fi
+    
+    echo -e "${RED}警告: 卸载 Fail2ban 将移除所有防护规则！${NC}"
+    read -p "确定要卸载 Fail2ban 吗? (输入 yes 确认): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo -e "${YELLOW}已取消卸载${NC}"
+        return 0
+    fi
+    
+    echo -e "${BLUE}正在停止并卸载 Fail2ban...${NC}"
+    systemctl stop fail2ban 2>/dev/null
+    systemctl disable fail2ban 2>/dev/null
+    apt purge fail2ban -y && apt autoremove -y
+    
+    # 清理配置文件
+    rm -rf /etc/fail2ban 2>/dev/null
+    
+    if ! command -v fail2ban-client &> /dev/null; then
+        success_msg "Fail2ban 已成功卸载"
+    else
+        echo -e "${RED}卸载失败${NC}"
+        return 1
+    fi
+}
+
 # 配置 Fail2ban
 configure_fail2ban_ssh() {
     # 首先确保服务正在运行
@@ -1385,6 +1575,42 @@ install_zerotier() {
     success_msg "ZeroTier已安装"
 }
 
+# 卸载 ZeroTier
+uninstall_zerotier() {
+    if ! command -v zerotier-cli &> /dev/null; then
+        echo -e "${YELLOW}ZeroTier 未安装${NC}"
+        return 0
+    fi
+    
+    echo -e "${RED}警告: 卸载 ZeroTier 将断开所有 ZeroTier 网络连接！${NC}"
+    read -p "确定要卸载 ZeroTier 吗? (输入 yes 确认): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo -e "${YELLOW}已取消卸载${NC}"
+        return 0
+    fi
+    
+    # 先离开所有网络
+    echo -e "${BLUE}正在离开所有 ZeroTier 网络...${NC}"
+    for network in $(zerotier-cli listnetworks 2>/dev/null | awk 'NR>1 {print $3}'); do
+        zerotier-cli leave "$network" 2>/dev/null
+    done
+    
+    echo -e "${BLUE}正在停止并卸载 ZeroTier...${NC}"
+    systemctl stop zerotier-one 2>/dev/null
+    systemctl disable zerotier-one 2>/dev/null
+    apt purge zerotier-one -y && apt autoremove -y
+    
+    # 清理配置
+    rm -rf /var/lib/zerotier-one 2>/dev/null
+    
+    if ! command -v zerotier-cli &> /dev/null; then
+        success_msg "ZeroTier 已成功卸载"
+    else
+        echo -e "${RED}卸载失败${NC}"
+        return 1
+    fi
+}
+
 check_zerotier_status() {
     if ! command -v zerotier-cli &> /dev/null; then
         echo -e "${RED}ZeroTier未安装${NC}"
@@ -1491,6 +1717,51 @@ install_docker() {
         docker --version
     else
         error_exit "Docker 安装后验证失败"
+    fi
+}
+
+# 卸载 Docker
+uninstall_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}Docker 未安装${NC}"
+        return 0
+    fi
+    
+    echo -e "${RED}警告: 卸载 Docker 将删除所有容器、镜像和卷！${NC}"
+    local running=$(docker ps -q 2>/dev/null | wc -l)
+    local total=$(docker ps -aq 2>/dev/null | wc -l)
+    local images=$(docker images -q 2>/dev/null | wc -l)
+    echo -e " ${CYAN}当前状态:${NC} 容器 ${total} 个 (运行中 ${running})，镜像 ${images} 个"
+    
+    read -p "确定要卸载 Docker 吗? (输入 yes 确认): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo -e "${YELLOW}已取消卸载${NC}"
+        return 0
+    fi
+    
+    echo -e "${BLUE}正在停止所有容器...${NC}"
+    docker stop $(docker ps -aq) 2>/dev/null
+    
+    echo -e "${BLUE}正在删除所有容器和镜像...${NC}"
+    docker rm $(docker ps -aq) 2>/dev/null
+    docker rmi $(docker images -q) 2>/dev/null
+    
+    echo -e "${BLUE}正在卸载 Docker...${NC}"
+    systemctl stop docker 2>/dev/null
+    systemctl disable docker 2>/dev/null
+    apt purge docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y 2>/dev/null
+    apt autoremove -y
+    
+    # 清理数据
+    rm -rf /var/lib/docker 2>/dev/null
+    rm -rf /var/lib/containerd 2>/dev/null
+    rm -f /usr/local/bin/docker-compose 2>/dev/null
+    
+    if ! command -v docker &> /dev/null; then
+        success_msg "Docker 已成功卸载"
+    else
+        echo -e "${RED}卸载可能不完整，请手动检查${NC}"
+        return 1
     fi
 }
 
@@ -2085,42 +2356,67 @@ clean_docker_resources() {
         return 1
     fi
 
-    # 清理未使用的镜像
-    echo -e "${YELLOW}正在清理未使用的镜像...${NC}"
-    unused_images=$(docker images -f "dangling=true" -q)
-    if [[ -n "$unused_images" ]]; then
-        docker rmi $unused_images
-        echo -e "${GREEN}未使用的镜像已删除${NC}"
-    else
-        echo -e "${GREEN}没有需要清理的未使用镜像${NC}"
-    fi
-
-    # 清理未使用的网络
-    echo -e "\n${YELLOW}正在清理未使用的网络...${NC}"
-    unused_networks=$(docker network ls -f "driver=bridge" -f "type=custom" | grep -v "NETWORK ID" | awk '{print $2}' | grep -v "bridge" | grep -v "host" | grep -v "none")
+    # 显示清理前的空间情况
+    echo -e "${YELLOW}清理前的 Docker 资源占用：${NC}"
+    docker system df
+    echo ""
     
-    if [[ -n "$unused_networks" ]]; then
-        for network in $unused_networks; do
-            # 检查网络是否正在被使用
-            network_containers=$(docker network inspect "$network" -f '{{range .Containers}}{{.Name}} {{end}}')
+    echo -e "${YELLOW}选择清理模式：${NC}"
+    echo "1. 保守清理 (只清理悬空镜像和已停止容器)"
+    echo "2. 标准清理 (清理所有未使用的镜像、容器、网络)"
+    echo "3. 深度清理 (清理所有未使用资源，包括 volumes)"
+    echo "0. 取消"
+    
+    read -p "选择清理模式 [0-3]: " clean_mode
+    
+    case $clean_mode in
+        1)
+            # 保守清理：只清理悬空镜像和已停止容器
+            echo -e "\n${YELLOW}正在清理已停止的容器...${NC}"
+            docker container prune -f
             
-            if [[ -z "$network_containers" ]]; then
-                docker network rm "$network"
-                echo -e "${GREEN}删除未使用网络: $network${NC}"
+            echo -e "\n${YELLOW}正在清理悬空镜像...${NC}"
+            docker image prune -f
+            ;;
+        2)
+            # 标准清理：清理所有未使用的镜像（包括没有容器引用的）
+            echo -e "\n${YELLOW}正在清理已停止的容器...${NC}"
+            docker container prune -f
+            
+            echo -e "\n${YELLOW}正在清理所有未使用的镜像（包括旧版本镜像）...${NC}"
+            docker image prune -a -f
+            
+            echo -e "\n${YELLOW}正在清理未使用的网络...${NC}"
+            docker network prune -f
+            
+            echo -e "\n${YELLOW}正在清理构建缓存...${NC}"
+            docker builder prune -f
+            ;;
+        3)
+            # 深度清理：一键清理所有
+            echo -e "${RED}警告：这将删除所有未使用的容器、网络、镜像和 volumes！${NC}"
+            read -p "确认深度清理? (输入 YES 确认): " confirm
+            if [ "$confirm" = "YES" ]; then
+                echo -e "\n${YELLOW}正在执行深度清理...${NC}"
+                docker system prune -a --volumes -f
             else
-                echo -e "${YELLOW}网络 $network 仍在使用，暂不删除${NC}"
+                echo -e "${YELLOW}已取消深度清理${NC}"
+                return
             fi
-        done
-    else
-        echo -e "${GREEN}没有需要清理的未使用网络${NC}"
-    fi
-
-    # 清理构建缓存
-    echo -e "\n${YELLOW}清理 Docker 构建缓存...${NC}"
-    docker builder prune -f
+            ;;
+        0)
+            echo -e "${YELLOW}已取消清理${NC}"
+            return
+            ;;
+        *)
+            echo -e "${RED}无效的选择${NC}"
+            return 1
+            ;;
+    esac
 
     # 显示清理后的空间
-    echo -e "\n${YELLOW}Docker 资源清理后的空间情况：${NC}"
+    echo -e "\n${GREEN}Docker 资源清理完成！${NC}"
+    echo -e "${YELLOW}清理后的 Docker 资源占用：${NC}"
     docker system df
 }
 
@@ -2441,11 +2737,37 @@ system_security_check() {
     # 2. 关键端口
     echo -e "${BOLD} 🌐 关键端口监听${NC}"
     echo -e "${BLUE}──────────────────────────────────────────────────────────────────────${NC}"
-    local ssh_port=$(ss -tlnp 2>/dev/null | grep -E ":22\s|sshd" | head -1 | awk '{print $4}' | sed 's/.*://')
+    
+    # 端口统计
+    local tcp_ext=$(ss -tlnp 2>/dev/null | grep -E "0\.0\.0\.0:|:::" | grep -c LISTEN 2>/dev/null || echo "0")
+    local tcp_loc=$(ss -tlnp 2>/dev/null | grep -v -E "0\.0\.0\.0:|:::" | grep -c LISTEN 2>/dev/null || echo "0")
+    local udp_ext=$(ss -ulnp 2>/dev/null | grep -E "0\.0\.0\.0:|:::" | grep -v "State" | wc -l 2>/dev/null || echo "0")
+    local udp_loc=$(ss -ulnp 2>/dev/null | grep -v -E "0\.0\.0\.0:|:::" | grep -v "State" | wc -l 2>/dev/null || echo "0")
+    
+    # UFW 实际放行检测
+    local ufw_actual=""
+    if command -v ufw &> /dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+        local ufw_allowed=$(ufw status 2>/dev/null | grep -E "ALLOW" | grep -oE "^[0-9]+" | sort -u)
+        local actual_count=0
+        
+        # 计算既在监听又在 UFW 放行的端口数
+        for port in $(ss -tlnp 2>/dev/null | grep -E "0\.0\.0\.0:|:::" | grep LISTEN | awk '{print $4}' | rev | cut -d: -f1 | rev | sort -u); do
+            if echo "$ufw_allowed" | grep -qx "$port"; then
+                ((actual_count++))
+            fi
+        done
+        ufw_actual="  ${CYAN}UFW实际:${NC} ${actual_count}"
+    else
+        ufw_actual="  ${DIM}(UFW未启用)${NC}"
+    fi
+    
+    echo -e " ${CYAN}TCP:${NC} 对外 ${tcp_ext} | 本地 ${tcp_loc}    ${CYAN}UDP:${NC} 对外 ${udp_ext} | 本地 ${udp_loc}${ufw_actual}"
+    
+    # 关键服务状态
+    local ssh_status=$(ss -tlnp 2>/dev/null | grep -qE ":22\s|sshd" && echo "${GREEN}●${NC}" || echo "${DIM}○${NC}")
     local http_status=$(ss -tlnp 2>/dev/null | grep -q ":80\s" && echo "${GREEN}●${NC}" || echo "${DIM}○${NC}")
     local https_status=$(ss -tlnp 2>/dev/null | grep -q ":443\s" && echo "${GREEN}●${NC}" || echo "${DIM}○${NC}")
-    local ssh_status=$(ss -tlnp 2>/dev/null | grep -qE ":22\s|:${ssh_port}\s" && echo "${GREEN}●${NC}" || echo "${DIM}○${NC}")
-    echo -e " SSH: ${ssh_status}   HTTP: ${http_status}   HTTPS: ${https_status}"
+    echo -e " ${CYAN}关键服务:${NC} SSH ${ssh_status}  HTTP ${http_status}  HTTPS ${https_status}"
     echo ""
     
     # 3. SSH 安全配置
@@ -3126,6 +3448,565 @@ view_hosts_file() {
     esac
 }
 
+# 14. 端口扫描检测
+port_scan_detection() {
+    clear_screen
+    show_header "端口扫描检测 - 安全审计"
+    
+    echo -e "${BOLD} 🔍 系统开放端口检测${NC}"
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    # 创建临时文件
+    local tcp_file=$(mktemp)
+    local udp_file=$(mktemp)
+    
+    # 收集 TCP 端口
+    if command -v ss &> /dev/null; then
+        ss -tlnp 2>/dev/null | grep LISTEN | while read -r line; do
+            local addr=$(echo "$line" | awk '{print $4}')
+            local port=$(echo "$addr" | rev | cut -d: -f1 | rev)
+            local bind_addr=$(echo "$addr" | rev | cut -d: -f2- | rev)
+            local process=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+' | head -1)
+            
+            local scope_type=""
+            if [[ "$bind_addr" == "0.0.0.0" ]] || [[ "$bind_addr" == "*" ]] || [[ "$bind_addr" == "[::]" ]]; then
+                scope_type="external"
+            elif [[ "$bind_addr" == "127.0.0.1" ]] || [[ "$bind_addr" == "::1" ]]; then
+                scope_type="local"
+            else
+                scope_type="internal"
+            fi
+            
+            echo "${port}|${scope_type}|${process:-未知}" >> "$tcp_file"
+        done
+        
+        # 收集 UDP 端口
+        ss -ulnp 2>/dev/null | grep -v "State" | while read -r line; do
+            local addr=$(echo "$line" | awk '{print $4}')
+            local port=$(echo "$addr" | rev | cut -d: -f1 | rev)
+            local bind_addr=$(echo "$addr" | rev | cut -d: -f2- | rev)
+            local process=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+' | head -1)
+            
+            [[ -z "$port" ]] && continue
+            
+            local scope_type=""
+            if [[ "$bind_addr" == "0.0.0.0" ]] || [[ "$bind_addr" == "*" ]]; then
+                scope_type="external"
+            else
+                scope_type="local"
+            fi
+            
+            echo "${port}|${scope_type}|${process:-未知}" >> "$udp_file"
+        done
+    fi
+    
+    # 去重并排序
+    local tcp_sorted=$(mktemp)
+    local udp_sorted=$(mktemp)
+    sort -u "$tcp_file" | sort -t'|' -k1 -n > "$tcp_sorted"
+    sort -u "$udp_file" | sort -t'|' -k1 -n > "$udp_sorted"
+    
+    # 统计
+    local tcp_count=$(wc -l < "$tcp_sorted" 2>/dev/null || echo "0")
+    local udp_count=$(wc -l < "$udp_sorted" 2>/dev/null || echo "0")
+    local tcp_external=$(grep -c '|external|' "$tcp_sorted" 2>/dev/null || echo "0")
+    local udp_external=$(grep -c '|external|' "$udp_sorted" 2>/dev/null || echo "0")
+    
+    # 显示表头
+    echo -e "${YELLOW}【TCP 监听端口】${NC}\t\t\t\t${YELLOW}【UDP 监听端口】${NC}"
+    echo -e "${DIM}端口\t\t状态\t服务${NC}\t\t\t${DIM}端口\t\t状态\t服务${NC}"
+    echo -e "${BLUE}────────────────────────────────────\t────────────────────────────────────${NC}"
+    
+    # 获取最大行数
+    local max_lines=$tcp_count
+    [ "$udp_count" -gt "$max_lines" ] && max_lines=$udp_count
+    
+    # 读取到数组
+    mapfile -t tcp_lines < "$tcp_sorted"
+    mapfile -t udp_lines < "$udp_sorted"
+    
+    # 格式化状态显示
+    get_scope_display() {
+        local scope_type="$1"
+        case "$scope_type" in
+            "external") echo -e "\033[0;31m[对外]\033[0m" ;;
+            "local")    echo -e "\033[0;32m[本地]\033[0m" ;;
+            "internal") echo -e "\033[1;33m[内网]\033[0m" ;;
+        esac
+    }
+    
+    # 并排显示
+    for ((i=0; i<max_lines; i++)); do
+        local tcp_line="${tcp_lines[$i]:-}"
+        local udp_line="${udp_lines[$i]:-}"
+        
+        # TCP 列
+        if [ -n "$tcp_line" ]; then
+            IFS='|' read -r port scope_type process <<< "$tcp_line"
+            local scope_display=$(get_scope_display "$scope_type")
+            printf " %-8s\t%b\t%-12s" "$port" "$scope_display" "${process:0:12}"
+        else
+            printf " %-8s\t%-6s\t%-12s" "" "" ""
+        fi
+        
+        printf "\t"
+        
+        # UDP 列
+        if [ -n "$udp_line" ]; then
+            IFS='|' read -r port scope_type process <<< "$udp_line"
+            local scope_display=$(get_scope_display "$scope_type")
+            printf " %-8s\t%b\t%-12s" "$port" "$scope_display" "${process:0:12}"
+        fi
+        
+        echo ""
+    done
+    
+    echo ""
+    echo -e "${BLUE}──────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # 统计信息
+    echo -e "${BOLD} 📊 统计信息${NC}"
+    echo -e " TCP: ${CYAN}${tcp_count}${NC} 个端口 (对外: ${RED}${tcp_external}${NC})    UDP: ${CYAN}${udp_count}${NC} 个端口 (对外: ${RED}${udp_external}${NC})"
+    
+    local total_external=$((tcp_external + udp_external))
+    echo ""
+    echo -e "${YELLOW}【安全建议】${NC}"
+    echo -e " ${DIM}注: 以上仅显示系统监听状态，实际是否对外取决于 UFW 防火墙规则${NC}"
+    if [ "$total_external" -gt 20 ]; then
+        echo -e " ${YELLOW}⚠ 监听端口较多 (${total_external}个)，建议检查服务是否必要${NC}"
+    else
+        echo -e " ${GREEN}✓ 监听端口数量正常${NC}"
+    fi
+    
+    # 常见危险端口检测
+    echo ""
+    echo -e "${YELLOW}【常见危险端口检测】${NC}"
+    local dangerous_ports=("21:FTP" "23:Telnet" "3306:MySQL" "5432:PostgreSQL" "6379:Redis" "27017:MongoDB" "11211:Memcached")
+    local found_dangerous=0
+    
+    for dp in "${dangerous_ports[@]}"; do
+        local port="${dp%%:*}"
+        local service="${dp##*:}"
+        if grep -q "^${port}|external|" "$tcp_sorted" 2>/dev/null || grep -q "^${port}|external|" "$udp_sorted" 2>/dev/null; then
+            echo -e " ${RED}⚠ 端口 $port ($service) 对外开放${NC}"
+            found_dangerous=1
+        fi
+    done
+    
+    if [ "$found_dangerous" -eq 0 ]; then
+        echo -e " ${GREEN}✓ 未发现常见危险端口对外开放${NC}"
+    fi
+    
+    # 结合 UFW 检测真正对外开放的端口
+    echo ""
+    echo -e "${YELLOW}【UFW 放行端口检测】${NC}"
+    if command -v ufw &> /dev/null && ufw status | grep -q "Status: active"; then
+        # 获取 UFW 允许的端口
+        local ufw_allowed=$(ufw status | grep -E "ALLOW" | grep -oE "^[0-9]+(/tcp|/udp)?" | sort -u)
+        local truly_open=0
+        local truly_open_list=""
+        
+        # 检查哪些监听端口在 UFW 中放行
+        while IFS='|' read -r port scope_type process; do
+            [ -z "$port" ] && continue
+            [ "$scope_type" != "external" ] && continue
+            
+            # 检查是否在 UFW 中放行
+            if echo "$ufw_allowed" | grep -qE "^${port}(/tcp)?$"; then
+                truly_open_list="${truly_open_list} ${port}/tcp"
+                ((truly_open++))
+            fi
+        done < "$tcp_sorted"
+        
+        while IFS='|' read -r port scope_type process; do
+            [ -z "$port" ] && continue
+            [ "$scope_type" != "external" ] && continue
+            
+            if echo "$ufw_allowed" | grep -qE "^${port}(/udp)?$"; then
+                truly_open_list="${truly_open_list} ${port}/udp"
+                ((truly_open++))
+            fi
+        done < "$udp_sorted"
+        
+        if [ "$truly_open" -gt 0 ]; then
+            echo -e " ${RED}真正对外开放: ${truly_open} 个端口${NC}"
+            echo -e " ${DIM}$(echo $truly_open_list | tr ' ' '\n' | sort -u | tr '\n' ' ')${NC}"
+        else
+            echo -e " ${GREEN}✓ 没有监听端口在 UFW 中放行 (或使用默认策略)${NC}"
+        fi
+    else
+        echo -e " ${DIM}UFW 未启用，无法检测${NC}"
+    fi
+    
+    # 清理临时文件
+    rm -f "$tcp_file" "$udp_file" "$tcp_sorted" "$udp_sorted"
+    
+    show_footer
+}
+
+# 15. 脚本自更新
+GITHUB_REPO="li88iioo/init_server"  # 请替换为你的 GitHub 仓库地址
+SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/init_server.sh"
+
+check_script_update() {
+    clear_screen
+    show_header "脚本更新检查"
+    
+    echo -e "${BOLD} 📦 当前版本: ${CYAN}v${VERSION}${NC}"
+    echo ""
+    
+    # 检查网络连接
+    echo -e "${YELLOW}正在检查网络连接...${NC}"
+    if ! ping -c 1 -W 3 github.com &>/dev/null && ! ping -c 1 -W 3 raw.githubusercontent.com &>/dev/null; then
+        echo -e "${RED}无法连接到 GitHub，请检查网络连接${NC}"
+        show_footer
+        return 1
+    fi
+    echo -e "${GREEN}网络连接正常${NC}"
+    echo ""
+    
+    # 获取远程版本
+    echo -e "${YELLOW}正在获取最新版本信息...${NC}"
+    local remote_version=""
+    
+    # 尝试获取远程脚本的版本号
+    remote_version=$(curl -sL --connect-timeout 10 "$SCRIPT_URL" 2>/dev/null | grep -m1 '^VERSION=' | cut -d'"' -f2)
+    
+    if [ -z "$remote_version" ]; then
+        echo -e "${YELLOW}无法获取远程版本信息${NC}"
+        echo -e "${DIM}可能原因: 仓库未配置或网络问题${NC}"
+        echo ""
+        echo -e "${CYAN}如需配置自动更新，请修改脚本中的 GITHUB_REPO 变量${NC}"
+        echo -e "${DIM}当前配置: ${GITHUB_REPO}${NC}"
+        show_footer
+        return 1
+    fi
+    
+    echo -e "${BOLD} 🌐 最新版本: ${CYAN}v${remote_version}${NC}"
+    echo ""
+    
+    # 版本比较
+    if [ "$VERSION" = "$remote_version" ]; then
+        echo -e "${GREEN}✓ 当前已是最新版本${NC}"
+        show_footer
+        return 0
+    fi
+    
+    # 简单版本比较 (假设版本号格式为 x.y.z)
+    local current_num=$(echo "$VERSION" | tr -d '.')
+    local remote_num=$(echo "$remote_version" | tr -d '.')
+    
+    if [ "$remote_num" -gt "$current_num" ] 2>/dev/null; then
+        echo -e "${YELLOW}发现新版本！${NC}"
+        echo ""
+        read -p "是否更新到 v${remote_version}? (y/n): " update_choice
+        
+        if [[ "$update_choice" =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}正在下载更新...${NC}"
+            
+            # 获取当前脚本路径
+            local script_path=$(readlink -f "$0")
+            local backup_path="${script_path}.bak.$(date +%Y%m%d%H%M%S)"
+            
+            # 备份当前脚本
+            cp "$script_path" "$backup_path"
+            echo -e "${GREEN}已备份当前脚本到: ${backup_path}${NC}"
+            
+            # 下载新版本
+            if curl -sL --connect-timeout 30 "$SCRIPT_URL" -o "${script_path}.new"; then
+                # 验证下载的文件
+                if head -1 "${script_path}.new" | grep -q "^#!/bin/bash"; then
+                    mv "${script_path}.new" "$script_path"
+                    chmod +x "$script_path"
+                    echo -e "${GREEN}✓ 更新成功！${NC}"
+                    echo -e "${YELLOW}请重新运行脚本以使用新版本${NC}"
+                    exit 0
+                else
+                    echo -e "${RED}下载的文件无效，更新失败${NC}"
+                    rm -f "${script_path}.new"
+                fi
+            else
+                echo -e "${RED}下载失败，请检查网络连接${NC}"
+            fi
+        else
+            echo -e "${YELLOW}已取消更新${NC}"
+        fi
+    else
+        echo -e "${CYAN}当前版本较新或相同${NC}"
+    fi
+    
+    show_footer
+}
+
+# 16. Docker 镜像源自动检测
+test_docker_mirrors() {
+    clear_screen
+    show_header "Docker 镜像源自动检测"
+    
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}Docker 未安装${NC}"
+        show_footer
+        return 1
+    fi
+    
+    echo -e "${BOLD} 🚀 正在测试镜像源速度...${NC}"
+    echo -e "${DIM}这可能需要几分钟时间${NC}"
+    echo ""
+    
+    # 常用镜像源列表
+    local mirrors=(
+        "https://docker.1ms.run"
+        "https://docker.xuanyuan.me"
+        "https://docker.m.daocloud.io"
+        "https://dockerhub.icu"
+        "https://hub.rat.dev"
+        "https://docker.nastool.de"
+        "https://docker.rainbond.cc"
+        "https://registry.dockermirror.com"
+    )
+    
+    local best_mirror=""
+    local best_time=99999
+    local results=()
+    
+    echo -e "${BLUE}────────────────────────────────────────────────────────${NC}"
+    printf " %-45s  %s\n" "镜像源" "延迟"
+    echo -e "${BLUE}────────────────────────────────────────────────────────${NC}"
+    
+    for mirror in "${mirrors[@]}"; do
+        # 提取域名
+        local domain=$(echo "$mirror" | sed 's|https://||' | cut -d/ -f1)
+        
+        # 测试连接延迟
+        local start_time=$(date +%s%N)
+        local http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$mirror/v2/" 2>/dev/null)
+        local end_time=$(date +%s%N)
+        
+        if [ "$http_code" = "200" ] || [ "$http_code" = "401" ]; then
+            local elapsed=$(( (end_time - start_time) / 1000000 ))
+            results+=("$elapsed:$mirror")
+            
+            if [ "$elapsed" -lt "$best_time" ]; then
+                best_time=$elapsed
+                best_mirror=$mirror
+            fi
+            
+            printf " %-45s  ${GREEN}%dms${NC}\n" "$mirror" "$elapsed"
+        else
+            printf " %-45s  ${RED}不可用${NC}\n" "$mirror"
+        fi
+    done
+    
+    echo -e "${BLUE}────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    if [ -n "$best_mirror" ]; then
+        echo -e "${GREEN}✓ 最快镜像源: ${CYAN}${best_mirror}${NC} (${best_time}ms)"
+        echo ""
+        read -p "是否使用此镜像源? (y/n): " use_mirror
+        
+        if [[ "$use_mirror" =~ ^[Yy]$ ]]; then
+            # 配置镜像源
+            mkdir -p /etc/docker
+            
+            # 备份现有配置
+            if [ -f "/etc/docker/daemon.json" ]; then
+                cp /etc/docker/daemon.json /etc/docker/daemon.json.bak.$(date +%Y%m%d%H%M%S)
+            fi
+            
+            # 写入新配置
+            if [ -f "/etc/docker/daemon.json" ] && [ -s "/etc/docker/daemon.json" ] && [ "$(cat /etc/docker/daemon.json)" != "{}" ]; then
+                # 使用 jq 如果可用
+                if command -v jq &> /dev/null; then
+                    local tmp_file=$(mktemp)
+                    jq --arg mirror "$best_mirror" '.["registry-mirrors"] = [$mirror]' /etc/docker/daemon.json > "$tmp_file"
+                    mv "$tmp_file" /etc/docker/daemon.json
+                else
+                    # 简单替换或添加
+                    if grep -q "registry-mirrors" /etc/docker/daemon.json; then
+                        sed -i "s|\"registry-mirrors\":\s*\[[^]]*\]|\"registry-mirrors\": [\"$best_mirror\"]|g" /etc/docker/daemon.json
+                    else
+                        # 在文件开头添加
+                        echo "{\"registry-mirrors\": [\"$best_mirror\"]}" > /etc/docker/daemon.json
+                    fi
+                fi
+            else
+                echo "{\"registry-mirrors\": [\"$best_mirror\"]}" > /etc/docker/daemon.json
+            fi
+            
+            echo -e "${YELLOW}正在重启 Docker 服务...${NC}"
+            if systemctl restart docker; then
+                echo -e "${GREEN}✓ 镜像源配置成功！${NC}"
+            else
+                echo -e "${RED}Docker 重启失败，请检查配置${NC}"
+            fi
+        fi
+    else
+        echo -e "${RED}所有镜像源均不可用${NC}"
+        echo -e "${YELLOW}可能是网络问题，请稍后重试${NC}"
+    fi
+    
+    show_footer
+}
+
+# 17. Docker Compose 项目管理
+manage_compose_projects() {
+    while true; do
+        clear_screen
+        show_header "Docker Compose 项目管理"
+        
+        if ! command -v docker &> /dev/null; then
+            echo -e "${RED}Docker 未安装${NC}"
+            show_footer
+            return 1
+        fi
+        
+        # 检查 docker compose 是否可用
+        local compose_cmd=""
+        if docker compose version &>/dev/null; then
+            compose_cmd="docker compose"
+        elif command -v docker-compose &>/dev/null; then
+            compose_cmd="docker-compose"
+        else
+            echo -e "${RED}Docker Compose 未安装${NC}"
+            echo -e "${YELLOW}请先安装 Docker Compose${NC}"
+            show_footer
+            return 1
+        fi
+        
+        echo -e "${BOLD} 📦 正在扫描 Compose 项目...${NC}"
+        echo ""
+        
+        # 获取所有运行中的 compose 项目
+        local projects=()
+        local project_dirs=()
+        
+        # 方法1: 通过 docker compose ls 获取
+        if docker compose ls &>/dev/null 2>&1; then
+            echo -e "${BLUE}────────────────────────────────────────────────────────${NC}"
+            printf " ${BOLD}%-3s %-25s %-12s %s${NC}\n" "序号" "项目名称" "状态" "路径"
+            echo -e "${BLUE}────────────────────────────────────────────────────────${NC}"
+            
+            local idx=1
+            while IFS= read -r line; do
+                [[ "$line" == "NAME"* ]] && continue
+                local name=$(echo "$line" | awk '{print $1}')
+                local status=$(echo "$line" | awk '{print $2}')
+                local dir=$(echo "$line" | awk '{print $3}')
+                
+                [[ -z "$name" ]] && continue
+                
+                projects+=("$name")
+                project_dirs+=("$dir")
+                
+                local status_color="${GREEN}"
+                [[ "$status" != "running"* ]] && status_color="${RED}"
+                
+                printf " %-3s %-25s ${status_color}%-12s${NC} %s\n" "$idx" "$name" "$status" "${dir:-未知}"
+                ((idx++))
+            done < <(docker compose ls 2>/dev/null)
+            
+            echo -e "${BLUE}────────────────────────────────────────────────────────${NC}"
+        fi
+        
+        if [ ${#projects[@]} -eq 0 ]; then
+            echo -e "${YELLOW}未发现运行中的 Compose 项目${NC}"
+            echo ""
+            echo -e "${DIM}提示: 只有通过 docker compose up 启动的项目才会显示${NC}"
+        fi
+        
+        echo ""
+        echo -e "${BOLD} 操作菜单${NC}"
+        show_menu_item "1" "启动项目 (up -d)"
+        show_menu_item "2" "停止项目 (down)"
+        show_menu_item "3" "重启项目 (restart)"
+        show_menu_item "4" "查看项目日志"
+        show_menu_item "5" "拉取项目镜像 (pull)"
+        show_menu_item "6" "更新并重启项目"
+        echo ""
+        show_menu_item "0" "返回"
+        echo -e "${CYAN}══════════════════════════════════════════════════════════${NC}"
+        
+        read -p "$(echo -e ${YELLOW}"选择操作 [0-6]: "${NC})" choice
+        
+        case $choice in
+            1|2|3|4|5|6)
+                if [ ${#projects[@]} -eq 0 ]; then
+                    read -p "请输入项目目录路径: " project_path
+                    if [ ! -d "$project_path" ]; then
+                        echo -e "${RED}目录不存在${NC}"
+                        continue
+                    fi
+                    if [ ! -f "$project_path/docker-compose.yml" ] && [ ! -f "$project_path/docker-compose.yaml" ] && [ ! -f "$project_path/compose.yml" ] && [ ! -f "$project_path/compose.yaml" ]; then
+                        echo -e "${RED}目录中没有找到 docker-compose 配置文件${NC}"
+                        continue
+                    fi
+                else
+                    read -p "请输入项目序号 (1-${#projects[@]}): " project_idx
+                    if ! [[ "$project_idx" =~ ^[0-9]+$ ]] || [ "$project_idx" -lt 1 ] || [ "$project_idx" -gt ${#projects[@]} ]; then
+                        echo -e "${RED}无效的序号${NC}"
+                        continue
+                    fi
+                    project_path="${project_dirs[$((project_idx-1))]}"
+                    # 如果路径为空，尝试查找
+                    if [ -z "$project_path" ] || [ ! -d "$project_path" ]; then
+                        local project_name="${projects[$((project_idx-1))]}"
+                        # 尝试从容器标签获取项目路径
+                        project_path=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' $(docker ps -q --filter "label=com.docker.compose.project=$project_name" | head -1) 2>/dev/null)
+                    fi
+                    
+                    if [ -z "$project_path" ] || [ ! -d "$project_path" ]; then
+                        read -p "请输入项目目录路径: " project_path
+                    fi
+                fi
+                
+                if [ ! -d "$project_path" ]; then
+                    echo -e "${RED}目录不存在: $project_path${NC}"
+                    read -p "按回车键继续..."
+                    continue
+                fi
+                
+                cd "$project_path" || continue
+                
+                case $choice in
+                    1)
+                        echo -e "${YELLOW}正在启动项目...${NC}"
+                        $compose_cmd up -d
+                        ;;
+                    2)
+                        echo -e "${YELLOW}正在停止项目...${NC}"
+                        $compose_cmd down
+                        ;;
+                    3)
+                        echo -e "${YELLOW}正在重启项目...${NC}"
+                        $compose_cmd restart
+                        ;;
+                    4)
+                        echo -e "${YELLOW}显示最近 50 行日志 (Ctrl+C 退出)${NC}"
+                        $compose_cmd logs --tail=50 -f
+                        ;;
+                    5)
+                        echo -e "${YELLOW}正在拉取镜像...${NC}"
+                        $compose_cmd pull
+                        ;;
+                    6)
+                        echo -e "${YELLOW}正在更新并重启...${NC}"
+                        $compose_cmd pull
+                        $compose_cmd up -d --remove-orphans
+                        ;;
+                esac
+                
+                cd - > /dev/null
+                ;;
+            0) return ;;
+            *) echo -e "${RED}无效的选择${NC}" ;;
+        esac
+        
+        [ "$choice" != "0" ] && [ "$choice" != "4" ] && read -p "$(echo -e ${YELLOW}"按回车键继续..."${NC})"
+    done
+}
+
 #子菜单
 # SSH配置子菜单
 ssh_menu() {
@@ -3200,11 +4081,12 @@ ufw_menu() {
         show_menu_item "4" "查看UFW规则列表"
         show_menu_item "5" "开放端口到指定IP"
         show_menu_item "6" "批量端口管理"
+        show_menu_item "7" "卸载UFW"
         echo ""
         show_menu_item "0" "返回主菜单"
         echo -e "${CYAN}══════════════════════════════════════════════════════════════════════${NC}"
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-6]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-7]: "${NC})" choice
         case $choice in
             1) install_ufw ;;
             2) configure_ufw ;;
@@ -3212,6 +4094,7 @@ ufw_menu() {
             4) check_ufw_status ;;
             5) open_port_to_ip ;;
             6) manage_batch_ports ;;
+            7) uninstall_ufw ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
@@ -3248,15 +4131,17 @@ fail2ban_menu() {
         show_menu_item "1" "安装Fail2ban"
         show_menu_item "2" "配置Fail2ban SSH防护"
         show_menu_item "3" "查看Fail2ban状态"
+        show_menu_item "4" "卸载Fail2ban"
         echo ""
         show_menu_item "0" "返回主菜单"
         echo -e "${CYAN}══════════════════════════════════════════════════════════════════════${NC}"
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-3]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-4]: "${NC})" choice
         case $choice in
             1) install_fail2ban ;;
             2) configure_fail2ban_ssh ;;
             3) check_fail2ban_status ;;
+            4) uninstall_fail2ban ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
@@ -3292,15 +4177,17 @@ zerotier_menu() {
         show_menu_item "1" "安装并加入网络"
         show_menu_item "2" "查看ZeroTier状态"
         show_menu_item "3" "配置ZeroTier SSH访问"
+        show_menu_item "4" "卸载ZeroTier"
         echo ""
         show_menu_item "0" "返回主菜单"
         echo -e "${CYAN}══════════════════════════════════════════════════════════════════════${NC}"
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-3]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-4]: "${NC})" choice
         case $choice in
             1) install_zerotier ;;
             2) check_zerotier_status ;;
             3) configure_zerotier_ssh ;;
+            4) uninstall_zerotier ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
@@ -3335,38 +4222,41 @@ docker_menu() {
         echo ""
         
         echo -e "${BLUE}──────────────────────────────────────────────────────────────────────${NC}"
-        echo -e "${BOLD} 基础配置${NC}"
-        show_menu_item "1" "安装 Docker"
-        show_menu_item "2" "安装 Docker Compose"
-        show_menu_item "3" "配置镜像加速"
+        # 基础配置 - 双列
+        echo -e " ${BOLD}基础配置${NC}"
+        echo -e "  ${YELLOW}01.${NC} ${GREEN}安装 Docker${NC}\t\t  ${YELLOW}02.${NC} ${GREEN}安装 Docker Compose${NC}"
+        echo -e "  ${YELLOW}03.${NC} ${GREEN}配置镜像加速${NC}\t\t  ${YELLOW}04.${NC} ${GREEN}自动检测最快镜像源${NC}"
         
+        # 网络配置 - 双列
         echo ""
-        echo -e "${BOLD} 网络配置${NC}"
-        show_menu_item "4" "配置 UFW Docker 规则"
-        show_menu_item "5" "开放 Docker 端口"
+        echo -e " ${BOLD}网络配置${NC}"
+        echo -e "  ${YELLOW}05.${NC} ${GREEN}配置 UFW Docker 规则${NC}\t  ${YELLOW}06.${NC} ${GREEN}开放 Docker 端口${NC}"
         
+        # 系统管理 - 双列
         echo ""
-        echo -e "${BOLD} 系统管理${NC}"
-        show_menu_item "6" "查看 Docker 容器信息"
-        show_menu_item "7" "容器管理(启动/停止/重启/删除)"
-        show_menu_item "8" "清理 Docker 资源"
-        show_menu_item "9" "查看 Docker 网络信息"
+        echo -e " ${BOLD}系统管理${NC}"
+        echo -e "  ${YELLOW}07.${NC} ${GREEN}查看容器信息${NC}\t\t  ${YELLOW}08.${NC} ${GREEN}容器管理${NC}"
+        echo -e "  ${YELLOW}09.${NC} ${GREEN}Compose项目管理${NC}\t\t  ${YELLOW}10.${NC} ${GREEN}清理Docker资源${NC}"
+        echo -e "  ${YELLOW}11.${NC} ${GREEN}查看网络信息${NC}\t\t  ${YELLOW}12.${NC} ${GREEN}卸载Docker${NC}"
         
         echo ""
         show_menu_item "0" "返回主菜单"
         echo -e "${CYAN}══════════════════════════════════════════════════════════════════════${NC}"
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-9]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-12]: "${NC})" choice
         case $choice in
             1) install_docker ;;
             2) install_docker_compose ;;
             3) configure_docker_mirror ;;
-            4) configure_ufw_docker ;;
-            5) open_docker_port ;;
-            6) show_docker_container_info ;;
-            7) manage_containers ;;
-            8) clean_docker_resources ;;
-            9) show_docker_networks ;;
+            4) test_docker_mirrors ;;
+            5) configure_ufw_docker ;;
+            6) open_docker_port ;;
+            7) show_docker_container_info ;;
+            8) manage_containers ;;
+            9) manage_compose_projects ;;
+            10) clean_docker_resources ;;
+            11) show_docker_networks ;;
+            12) uninstall_docker ;;
             0) return ;;
             *) echo -e "${RED}无效的选择${NC}" ;;
         esac
@@ -3379,7 +4269,7 @@ network_settings_menu() {
     while true; do
         clear_screen
         echo -e "${CYAN}══════════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${BOLD} 🌐 网络设置${NC}"
+        echo -e "${BOLD} 🌐 网络&时区设置${NC}"
         echo -e "${CYAN}══════════════════════════════════════════════════════════════════════${NC}"
         echo ""
         
@@ -3443,33 +4333,31 @@ main_menu() {
         echo -e "${BOLD} 🛠️  功能菜单${NC}"
         echo -e "${BLUE}──────────────────────────────────────────────────${NC}"
         
+        # 系统管理 - 双列
         echo -e " ${CYAN}[系统管理]${NC}"
-        show_menu_item "01" "更新系统"
-        show_menu_item "02" "SSH配置"
-        show_menu_item "03" "UFW防火墙配置"
-        show_menu_item "04" "Fail2ban配置"
-        show_menu_item "05" "ZeroTier配置"
-        show_menu_item "06" "Docker配置"
-        show_menu_item "07" "Swap配置"
+        echo -e "  ${YELLOW}01.${NC} ${GREEN}更新系统${NC}\t\t  ${YELLOW}02.${NC} ${GREEN}SSH配置${NC}"
+        echo -e "  ${YELLOW}03.${NC} ${GREEN}UFW防火墙配置${NC}\t  ${YELLOW}04.${NC} ${GREEN}Fail2ban配置${NC}"
+        echo -e "  ${YELLOW}05.${NC} ${GREEN}ZeroTier配置${NC}\t  ${YELLOW}06.${NC} ${GREEN}Docker配置${NC}"
+        echo -e "  ${YELLOW}07.${NC} ${GREEN}Swap配置${NC}"
         
-        echo ""
-        echo -e " ${CYAN}[应用安装]${NC}"
-        show_menu_item "08" "1Panel安装"
-        show_menu_item "09" "v2ray-agent安装"
-        
+        # 系统工具 - 双列
         echo ""
         echo -e " ${CYAN}[系统工具]${NC}"
-        show_menu_item "10" "系统安全检查"
-        show_menu_item "11" "系统安全加固"
-        show_menu_item "12" "系统资源监控"
-        show_menu_item "13" "网络设置"
+        echo -e "  ${YELLOW}10.${NC} ${GREEN}系统安全检查${NC}\t  ${YELLOW}11.${NC} ${GREEN}系统安全加固${NC}"
+        echo -e "  ${YELLOW}12.${NC} ${GREEN}系统资源监控${NC}\t  ${YELLOW}13.${NC} ${GREEN}网络&时区设置${NC}"
+        echo -e "  ${YELLOW}14.${NC} ${GREEN}端口扫描检测${NC}\t  ${YELLOW}15.${NC} ${GREEN}检查脚本更新${NC}"
+        
+        # 应用安装 - 双列
+        echo ""
+        echo -e " ${CYAN}[应用安装]${NC}"
+        echo -e "  ${YELLOW}08.${NC} ${GREEN}1Panel安装${NC}\t  ${YELLOW}09.${NC} ${GREEN}v2ray-agent安装${NC}"
         
         echo -e ""
         show_menu_item "0" "退出系统"
         
         show_footer
         
-        read -p "$(echo -e ${YELLOW}"请选择操作 [0-13]: "${NC})" choice
+        read -p "$(echo -e ${YELLOW}"请选择操作 [0-15]: "${NC})" choice
         case $choice in
             1) system_update ;;
             2) ssh_menu ;;
@@ -3484,6 +4372,8 @@ main_menu() {
             11) system_security_hardening ;;
             12) system_resource_monitor ;;
             13) network_settings_menu ;;
+            14) port_scan_detection ;;
+            15) check_script_update ;;
             0) 
                 clear_screen
                 echo -e "${GREEN}感谢使用，再见！${NC}"
