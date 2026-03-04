@@ -2,9 +2,9 @@
 
 # ============================================
 # 服务器配置管理系统
-# 版本: 1.3.0
+# 版本: 1.3.1
 # ============================================
-VERSION="1.3.0"
+VERSION="1.3.1"
 
 # 设置脚本选项增强健壮性
 set -o pipefail
@@ -293,19 +293,25 @@ modify_ssh_port() {
     # 备份配置文件
     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
     
-    sed -i "s/#Port 22/Port ${new_port}/" /etc/ssh/sshd_config
-    sed -i "s/Port [0-9]*/Port ${new_port}/" /etc/ssh/sshd_config
-    
-    # 验证配置语法
+    # 稳健替换：匹配注释行/前导空格，若无 Port 行则追加
+    if grep -qE '^\s*#?\s*Port\s+[0-9]+' /etc/ssh/sshd_config; then
+        sed -i -E "s/^\s*#?\s*Port\s+[0-9]+/Port ${new_port}/" /etc/ssh/sshd_config
+    else
+        echo "Port ${new_port}" >> /etc/ssh/sshd_config
+    fi
+
+    # 验证配置语法，失败则回滚
     if ! sshd -t 2>/dev/null; then
         echo -e "${RED}SSH配置语法错误，正在恢复备份...${NC}"
         cp "$(ls -t /etc/ssh/sshd_config.bak.* | head -1)" /etc/ssh/sshd_config
         error_exit "SSH配置修改失败"
     fi
-    
-    systemctl restart sshd || error_exit "SSH重启失败"
+
+    systemctl restart sshd 2>/dev/null || systemctl restart ssh || error_exit "SSH重启失败"
     success_msg "SSH端口已修改为: $new_port"
     echo -e "${YELLOW}重要: 请确保防火墙已开放新端口 $new_port${NC}"
+    echo -e "${CYAN}当前生效配置:${NC}"
+    sshd -T 2>/dev/null | grep -E '^port '
 }
 
 check_ssh_port() {
@@ -354,8 +360,9 @@ modify_ssh_config() {
     # 创建配置备份
     cp "$sshd_config" "$backup_file" || error_exit "无法创建配置文件备份"
     
-    if grep -q "^${key}" "$sshd_config"; then
-        sed -i "s/^${key}.*/${key} ${value}/" "$sshd_config"
+    # 同时处理已激活行和注释行（如出厂 #PubkeyAuthentication no）
+    if grep -qE "^\s*#?\s*${key}\s" "$sshd_config"; then
+        sed -i -E "s/^\s*#?\s*${key}\s.*/${key} ${value}/" "$sshd_config"
     else
         echo "${key} ${value}" >> "$sshd_config"
     fi
@@ -398,10 +405,18 @@ configure_ssh_key() {
                         if ! cat >> ~/.ssh/authorized_keys; then
                             error_exit "密钥写入失败"
                         fi
-                        validate_ssh_key "$(cat ~/.ssh/authorized_keys)" || {
+                        # 逐行校验，至少一行有效即通过
+                        local any_valid=0
+                        while IFS= read -r line; do
+                            [[ -z "$line" || "$line" =~ ^# ]] && continue
+                            if validate_ssh_key "$line" 2>/dev/null; then
+                                any_valid=1; break
+                            fi
+                        done < ~/.ssh/authorized_keys
+                        if [ "$any_valid" -eq 0 ]; then
                             rm -f ~/.ssh/authorized_keys
-                            error_exit "密钥验证失败"
-                        }
+                            error_exit "密钥验证失败：无有效公钥行"
+                        fi
                         break
                         ;;
                     "输入密钥内容")
@@ -443,17 +458,27 @@ configure_ssh_key() {
                 return
             fi
 
-            # 修改关键配置
-            modify_ssh_config "PermitRootLogin" "without-password"
+            # 防锁死检查：禁用密码前必须有有效密钥
+            if ! check_authorized_keys > /dev/null 2>&1; then
+                echo -e "${RED}错误：~/.ssh/authorized_keys 不存在或无有效密钥，中止加固以防锁死${NC}"
+                return 1
+            fi
+
+            echo -e "${YELLOW}⚠ 建议保持当前会话/控制台窗口，待新连接验证成功后再关闭${NC}"
+
+            # 修改关键配置（顺序：先开公钥，再改 root 登录，最后禁密码）
+            modify_ssh_config "PubkeyAuthentication" "yes"
+            modify_ssh_config "PermitRootLogin" "prohibit-password"
             modify_ssh_config "PasswordAuthentication" "no"
             modify_ssh_config "PermitUserEnvironment" "no"
             modify_ssh_config "ChallengeResponseAuthentication" "no"
             modify_ssh_config "PermitEmptyPasswords" "no"
 
-            # 重启服务
-            if systemctl restart sshd; then
-                echo -e "${GREEN}安全加固完成，当前配置："
-                sshd -T | grep -E 'permitrootlogin|passwordauthentication|permituserenvironment'
+            # 重启服务（兼容 Debian/Ubuntu 与 RHEL）
+            if systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null; then
+                echo -e "${GREEN}安全加固完成，当前生效配置：${NC}"
+                sshd -T 2>/dev/null | grep -E 'port|pubkeyauthentication|passwordauthentication|permitrootlogin|authorizedkeysfile'
+                echo -e "${YELLOW}⚠ 请立即用新会话测试 SSH 密钥登录，确认无误后再关闭当前会话${NC}"
             else
                 error_exit "SSH服务重启失败，请检查日志：journalctl -u sshd"
             fi
@@ -1302,20 +1327,28 @@ install_fail2ban() {
     # 确保 rsyslog 运行
     systemctl enable rsyslog
     systemctl start rsyslog
-    
+
     # 安装 Fail2ban
     apt install fail2ban -y || error_exit "Fail2ban 安装失败"
-    
+
+    # 确保日志文件存在（rsyslog 可能尚未写入）
+    touch /var/log/auth.log
+
     # 创建默认配置
     if [ ! -f "/etc/fail2ban/jail.local" ]; then
         cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
     fi
-    
+
     # 启动服务
     systemctl enable fail2ban
     systemctl start fail2ban
-    
-    success_msg "Fail2ban 安装完成"
+    sleep 2
+
+    if systemctl is-active --quiet fail2ban; then
+        success_msg "Fail2ban 安装完成并已启动"
+    else
+        echo -e "${YELLOW}Fail2ban 已安装，但启动失败，请执行: journalctl -u fail2ban -n 20 查看原因${NC}"
+    fi
 }
 
 # 卸载 Fail2ban
@@ -1353,21 +1386,15 @@ configure_fail2ban_ssh() {
     # 首先确保服务正在运行
     if ! systemctl is-active --quiet fail2ban; then
         echo -e "${YELLOW}Fail2ban 服务未运行，正在启动...${NC}"
+        # 确保日志文件存在，避免 fail2ban 因找不到 auth.log 而退出
+        touch /var/log/auth.log
+        rm -f /var/run/fail2ban/fail2ban.sock 2>/dev/null
         systemctl start fail2ban
-        sleep 3  # 增加等待时间
-        
+        sleep 3
+
         if ! systemctl is-active --quiet fail2ban; then
-            echo -e "${RED}Fail2ban 服务启动失败，尝试修复...${NC}"
-            
-            # 尝试修复服务
-            systemctl stop fail2ban
-            rm -f /var/run/fail2ban/fail2ban.sock 2>/dev/null
-            systemctl start fail2ban
-            sleep 3
-            
-            if ! systemctl is-active --quiet fail2ban; then
-                error_exit "无法启动 Fail2ban 服务，请检查系统日志: journalctl -u fail2ban"
-            fi
+            echo -e "${RED}Fail2ban 服务启动失败，请查看: journalctl -u fail2ban -n 30${NC}"
+            error_exit "无法启动 Fail2ban 服务"
         fi
     fi
 
@@ -1405,8 +1432,16 @@ configure_fail2ban_ssh() {
         cp /etc/fail2ban/jail.local "/etc/fail2ban/jail.local.backup_$(date +%Y%m%d%H%M%S)"
     fi
     
+    # 确定日志后端：优先 auth.log，不存在则用 systemd journal
+    local logpath="/var/log/auth.log"
+    local backend="auto"
+    if [ ! -f "$logpath" ]; then
+        touch "$logpath" 2>/dev/null || { logpath=""; backend="systemd"; }
+    fi
+
     # 生成新配置
-    cat > /etc/fail2ban/jail.local << EOF
+    {
+        cat << EOF
 [DEFAULT]
 bantime = $bantime
 findtime = 600
@@ -1418,15 +1453,16 @@ banaction_allports = iptables-allports
 enabled = true
 port = $port
 filter = sshd
-logpath = /var/log/auth.log
+EOF
+        [ -n "$logpath" ] && echo "logpath = $logpath"
+        [ "$backend" = "systemd" ] && echo "backend = systemd"
+        cat << EOF
 maxretry = $maxretry
 bantime = $bantime
 findtime = 600
 EOF
-    
-    # 确保日志文件存在
-    touch /var/log/auth.log
-    
+    } > /etc/fail2ban/jail.local
+
     # 重启服务并等待
     echo -e "${YELLOW}正在重启 Fail2ban 服务...${NC}"
     systemctl restart fail2ban
