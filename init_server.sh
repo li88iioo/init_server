@@ -2,9 +2,9 @@
 
 # ============================================
 # 服务器配置管理系统
-# 版本: 1.3.1
+# 版本: 1.3.2
 # ============================================
-VERSION="1.3.1"
+VERSION="1.3.2"
 
 # 设置脚本选项增强健壮性
 set -o pipefail
@@ -444,6 +444,12 @@ configure_ssh_key() {
         fi
     fi
 
+    # 密钥刚配置完，重新检查一次状态，以便本次就能进入安全加固
+    if [ $check_result -ne 0 ]; then
+        check_authorized_keys > /dev/null 2>&1
+        check_result=$?
+    fi
+
     # 安全加固配置
     if [ $check_result -eq 0 ]; then
         echo -e "${YELLOW}当前存在有效密钥配置，建议执行安全加固："
@@ -576,28 +582,28 @@ configure_ufw_ping() {
     case $ping_choice in
         1)
             # 使用sysctl禁止PING
-            echo 1 | sudo tee /proc/sys/net/ipv4/icmp_echo_ignore_all > /dev/null
+            echo 1 | tee /proc/sys/net/ipv4/icmp_echo_ignore_all > /dev/null
             
             # 永久生效
             if ! grep -q "net.ipv4.icmp_echo_ignore_all = 1" /etc/sysctl.conf; then
-                echo "net.ipv4.icmp_echo_ignore_all = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
+                echo "net.ipv4.icmp_echo_ignore_all = 1" | tee -a /etc/sysctl.conf > /dev/null
             fi
             
             # 应用更改
-            sudo sysctl -p > /dev/null
+            sysctl -p > /dev/null
             
             success_msg "已禁止PING"
             ;;
         
         2)
             # 使用sysctl恢复PING
-            echo 0 | sudo tee /proc/sys/net/ipv4/icmp_echo_ignore_all > /dev/null
+            echo 0 | tee /proc/sys/net/ipv4/icmp_echo_ignore_all > /dev/null
             
             # 修改sysctl.conf中的配置
-            sudo sed -i 's/net.ipv4.icmp_echo_ignore_all = 1/net.ipv4.icmp_echo_ignore_all = 0/' /etc/sysctl.conf
+            sed -i 's/net.ipv4.icmp_echo_ignore_all = 1/net.ipv4.icmp_echo_ignore_all = 0/' /etc/sysctl.conf
             
             # 应用更改
-            sudo sysctl -p > /dev/null
+            sysctl -p > /dev/null
             
             success_msg "已恢复PING"
             ;;
@@ -1284,10 +1290,12 @@ check_fail2ban_installation() {
     # 检查服务状态并尝试启动
     if ! systemctl is-active --quiet fail2ban; then
         echo -e "${YELLOW}Fail2ban 服务未运行，尝试启动...${NC}"
+        touch /var/log/auth.log 2>/dev/null
+        rm -f /var/run/fail2ban/fail2ban.sock 2>/dev/null
         systemctl start fail2ban
-        sleep 2  # 等待服务启动
+        sleep 2
         if ! systemctl is-active --quiet fail2ban; then
-            echo -e "${RED}Fail2ban 服务启动失败${NC}"
+            echo -e "${RED}Fail2ban 服务启动失败，请查看: journalctl -u fail2ban -n 20${NC}"
             return 2
         fi
     fi
@@ -1408,11 +1416,11 @@ configure_fail2ban_ssh() {
     
     # 验证输入
     while true; do
-        read -p "请输入最大尝试次数 [3-10]: " maxretry
-        if [[ "$maxretry" =~ ^[0-9]+$ ]] && [ "$maxretry" -ge 3 ] && [ "$maxretry" -le 10 ]; then
+        read -p "请输入最大尝试次数 [1-10]: " maxretry
+        if [[ "$maxretry" =~ ^[0-9]+$ ]] && [ "$maxretry" -ge 1 ] && [ "$maxretry" -le 10 ]; then
             break
         fi
-        echo -e "${RED}无效的输入，请输入3-10之间的数字${NC}"
+        echo -e "${RED}无效的输入，请输入1-10之间的数字${NC}"
     done
     
     while true; do
@@ -1423,9 +1431,11 @@ configure_fail2ban_ssh() {
         echo -e "${RED}无效的输入，请输入600-86400之间的数字或-1${NC}"
     done
     
-    # 获取 SSH 端口
-    local port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}')
-    port=${port:-22}  # 默认使用 22 端口
+    # 获取 SSH 端口（优先用 sshd -T 取实际生效值）
+    local port
+    port=$(sshd -T 2>/dev/null | grep "^port " | awk '{print $2}')
+    [ -z "$port" ] && port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    port=${port:-22}
     
     # 备份现有配置
     if [ -f "/etc/fail2ban/jail.local" ]; then
@@ -1815,9 +1825,16 @@ install_docker_compose() {
     fi
     
     echo "正在安装 Docker Compose..."
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    if ! curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose; then
+        error_exit "Docker Compose 下载失败"
+    fi
     chmod +x /usr/local/bin/docker-compose
-    success_msg "Docker Compose 安装完成"
+    if docker-compose --version &>/dev/null; then
+        success_msg "Docker Compose 安装完成"
+        docker-compose --version
+    else
+        error_exit "Docker Compose 安装后验证失败"
+    fi
 }
 
 # 添加进度条/等待提示函数
@@ -1910,8 +1927,8 @@ configure_docker_mirror() {
             # 应用测试配置
             cp /tmp/test_daemon.json /etc/docker/daemon.json
 
-            # 测试Docker是否能启动
-            show_loading "测试镜像配置" 30
+            # 测试Docker是否能启动（直接 restart，不用 show_loading 盲等）
+            echo -e "${YELLOW}正在重启 Docker 测试配置...${NC}"
             if ! systemctl restart docker; then
                 echo -e "${RED}使用此镜像地址无法启动Docker，可能是镜像地址无效${NC}"
                 echo -e "${YELLOW}正在恢复原配置...${NC}"
@@ -1919,7 +1936,7 @@ configure_docker_mirror() {
                 if [ -f "/etc/docker/daemon.json.tmp" ]; then
                     cp /etc/docker/daemon.json.tmp /etc/docker/daemon.json
                     rm /etc/docker/daemon.json.tmp
-                    show_loading "恢复原配置" 3
+                    echo -e "${YELLOW}正在恢复原配置...${NC}"
                     systemctl restart docker
                 fi
                 show_footer
@@ -1971,7 +1988,6 @@ configure_docker_mirror() {
             
             # 重启Docker服务
             echo -e "${YELLOW}正在应用配置并重启Docker服务...${NC}"
-            show_loading "正在重启Docker" 30
             systemctl restart docker
             echo -e "${GREEN}已配置Docker镜像加速并重启Docker服务${NC}"
             echo -e "${GREEN}镜像加速地址: ${mirror_url}${NC}"
@@ -1985,10 +2001,8 @@ configure_docker_mirror() {
                 # 简单地创建一个空的配置文件
                 echo '{}' > /etc/docker/daemon.json
                 
-                # 重启Docker服务
                 echo -e "${YELLOW}正在重启Docker服务...${NC}"
-                show_loading "等待Docker服务重启" 5
-                
+
                 if systemctl restart docker; then
                     echo -e "${GREEN}已删除镜像加速配置并重启Docker服务${NC}"
                 else
@@ -2017,12 +2031,25 @@ configure_docker_mirror() {
 # UFW Docker 配置函数
 configure_ufw_docker() {
     echo "正在配置 UFW Docker 规则..."
-    
+
+    local after_rules="/etc/ufw/after.rules"
+
+    if [ ! -f "$after_rules" ]; then
+        echo -e "${RED}错误：$after_rules 不存在${NC}"
+        return 1
+    fi
+
+    # 检查是否已经配置过，避免重复追加
+    if grep -q "BEGIN UFW AND DOCKER" "$after_rules"; then
+        echo -e "${YELLOW}UFW Docker 规则已存在，跳过配置${NC}"
+        return 0
+    fi
+
     # 备份原始配置文件
-    cp /etc/ufw/after.rules /etc/ufw/after.rules.backup
-    
+    cp "$after_rules" "${after_rules}.backup.$(date +%Y%m%d%H%M%S)"
+
     # 追加 Docker UFW 规则
-    cat >> /etc/ufw/after.rules << 'EOF'
+    cat >> "$after_rules" << 'EOF'
 # BEGIN UFW AND DOCKER
 *filter
 :ufw-user-forward - [0:0]
@@ -2066,14 +2093,23 @@ open_docker_port() {
     
     read -p "请选择操作: " port_choice
     case $port_choice in
-        1) 
+        1)
             read -p "请输入要开放的端口号（容器的实际端口，而非主机映射端口，如-P 8080:80，则开放80端口）: " port
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo -e "${RED}无效的端口号${NC}"; return 1
+            fi
             ufw route allow proto tcp from any to any port "$port"
             success_msg "已开放端口 $port 给所有公网IP"
             ;;
         2)
             read -p "请输入要开放的端口号: " port
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo -e "${RED}无效的端口号${NC}"; return 1
+            fi
             read -p "请输入指定的IP地址: " host_ip
+            if ! [[ "$host_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]]; then
+                echo -e "${RED}无效的IP地址格式${NC}"; return 1
+            fi
             ufw route allow from "$host_ip" to any port "$port"
             success_msg "已开放端口 $port 给 $host_ip"
             ;;
@@ -2609,10 +2645,11 @@ create_swap() {
         fi
     fi
     
-    # 获取系统内存大小（以 GB 为单位）
-    local mem_total=$(free -g | awk '/^Mem:/{print $2}')
-    
-    echo -e "\n${BLUE}推荐 Swap 大小：${NC}"
+    # 获取系统内存大小（用 MB 避免 <1GB 机器 free -g 返回 0）
+    local mem_total_mb=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}')
+    local mem_total=$(( (mem_total_mb + 512) / 1024 ))  # 四舍五入到 GB，最小为 0
+
+    echo -e "\n${BLUE}推荐 Swap 大小（当前内存约 ${mem_total_mb}MB）：${NC}"
     echo "1) 内存小于 2GB：建议设置为内存的 2 倍"
     echo "2) 内存 2-8GB：建议设置为内存大小"
     echo "3) 内存大于 8GB：建议设置为 8GB 或根据需求调整"
@@ -2730,23 +2767,139 @@ install_v2ray_agent() {
     read -p "是否安装v2ray-agent? (y/n): " answer
     if [[ "$answer" =~ ^[Yy]$ ]]; then
         local script_file="/tmp/v2ray-agent-install.sh"
-        
+
         echo -e "${BLUE}正在下载 v2ray-agent 安装脚本...${NC}"
         if ! wget -O "$script_file" https://raw.githubusercontent.com/mack-a/v2ray-agent/master/install.sh 2>/dev/null; then
             error_exit "v2ray-agent 脚本下载失败"
         fi
-        
+
         if [ ! -s "$script_file" ]; then
             error_exit "下载的脚本文件为空"
         fi
-        
+
+        # 记录 UFW 安装和启用状态，用于事后恢复
+        local ufw_was_active=0
+        local ufw_rules_backup=""
+        if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+            ufw_was_active=1
+            # 备份规则文件，恢复时重新加载（比重建规则更可靠）
+            ufw_rules_backup="/tmp/ufw_user_rules_backup_$(date +%Y%m%d%H%M%S)"
+            cp /etc/ufw/user.rules "$ufw_rules_backup" 2>/dev/null
+            cp /etc/ufw/user6.rules "${ufw_rules_backup}.v6" 2>/dev/null
+            echo -e "${YELLOW}⚠ 检测到 UFW 已启用，v2ray-agent 配置完成后将自动恢复 UFW${NC}"
+            echo -e "${YELLOW}  UFW 规则已备份至 ${ufw_rules_backup}${NC}"
+        fi
+
         chmod 700 "$script_file"
         "$script_file"
         local exit_code=$?
         rm -f "$script_file"
-        
+
         if [ $exit_code -ne 0 ]; then
             echo -e "${YELLOW}v2ray-agent 安装脚本退出码: $exit_code${NC}"
+        fi
+
+        # v2ray-agent 可能破坏 UFW 规则链，自动检测并恢复
+        if [ $ufw_was_active -eq 1 ]; then
+            echo -e "${YELLOW}正在检查 UFW 状态...${NC}"
+
+            # v2ray-agent 会安装 iptables-persistent(netfilter-persistent)
+            # 两者同时管理 iptables 会导致 UFW 规则链被覆盖
+            # 解决：停止 netfilter-persistent，让 UFW 重新独占接管
+            if systemctl is-active --quiet netfilter-persistent 2>/dev/null || \
+               systemctl is-enabled --quiet netfilter-persistent 2>/dev/null; then
+                echo -e "${YELLOW}检测到 netfilter-persistent 与 UFW 冲突，正在解除冲突...${NC}"
+                systemctl stop netfilter-persistent 2>/dev/null
+                systemctl disable netfilter-persistent 2>/dev/null
+            fi
+
+            # 恢复规则文件
+            if [ -f "$ufw_rules_backup" ]; then
+                cp "$ufw_rules_backup" /etc/ufw/user.rules 2>/dev/null
+                cp "${ufw_rules_backup}.v6" /etc/ufw/user6.rules 2>/dev/null
+            fi
+
+            # 确保 SSH 端口放行，防止恢复时锁死
+            local ssh_port
+            ssh_port=$(sshd -T 2>/dev/null | grep "^port " | awk '{print $2}')
+            ssh_port=${ssh_port:-22}
+            ufw allow "${ssh_port}/tcp" comment 'SSH' 2>/dev/null
+
+            # 重启 UFW 让它重新写入 iptables
+            ufw --force enable
+            systemctl restart ufw 2>/dev/null
+
+            if ufw status 2>/dev/null | grep -q "Status: active"; then
+                echo -e "${GREEN}UFW 已恢复，原有规则已还原${NC}"
+                ufw status verbose
+
+                # 自动读取 v2ray-agent 配置的端口并补充到 UFW
+                echo -e "\n${YELLOW}正在自动读取 v2ray-agent 配置的端口...${NC}"
+                local added_ports=()
+
+                if command -v jq &>/dev/null; then
+                    # xray: /etc/v2ray-agent/xray/conf/*.json → .inbounds[0].port (TCP)
+                    if [ -d "/etc/v2ray-agent/xray/conf" ]; then
+                        for f in /etc/v2ray-agent/xray/conf/*.json; do
+                            [ -f "$f" ] || continue
+                            local p
+                            p=$(jq -r '.inbounds[0].port // empty' "$f" 2>/dev/null)
+                            [[ "$p" =~ ^[0-9]+$ ]] || continue
+                            ufw allow "${p}/tcp" 2>/dev/null && added_ports+=("${p}/tcp")
+                        done
+                    fi
+
+                    # sing-box 分散配置: /etc/v2ray-agent/sing-box/conf/config/*.json
+                    if [ -d "/etc/v2ray-agent/sing-box/conf/config" ]; then
+                        for f in /etc/v2ray-agent/sing-box/conf/config/*.json; do
+                            [ -f "$f" ] || continue
+                            local p
+                            p=$(jq -r '.inbounds[0].listen_port // empty' "$f" 2>/dev/null)
+                            [[ "$p" =~ ^[0-9]+$ ]] || continue
+                            # hysteria2/tuic 是 UDP
+                            if [[ "$f" =~ hysteria|tuic ]]; then
+                                ufw allow "${p}/udp" 2>/dev/null && added_ports+=("${p}/udp")
+                            else
+                                ufw allow "${p}/tcp" 2>/dev/null && added_ports+=("${p}/tcp")
+                            fi
+                        done
+                    fi
+
+                    # sing-box 单文件配置: /etc/v2ray-agent/sing-box/conf/config.json
+                    if [ -f "/etc/v2ray-agent/sing-box/conf/config.json" ]; then
+                        while IFS= read -r p; do
+                            [[ "$p" =~ ^[0-9]+$ ]] || continue
+                            ufw allow "${p}/tcp" 2>/dev/null
+                            ufw allow "${p}/udp" 2>/dev/null
+                            added_ports+=("${p}/tcp+udp")
+                        done < <(jq -r '.inbounds[].listen_port // empty' \
+                                 "/etc/v2ray-agent/sing-box/conf/config.json" 2>/dev/null)
+                    fi
+                else
+                    # jq 不可用时，用 grep 粗提取端口号
+                    for f in /etc/v2ray-agent/xray/conf/*.json \
+                              /etc/v2ray-agent/sing-box/conf/config/*.json \
+                              /etc/v2ray-agent/sing-box/conf/config.json; do
+                        [ -f "$f" ] || continue
+                        while IFS= read -r p; do
+                            [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -le 65535 ] || continue
+                            ufw allow "${p}/tcp" 2>/dev/null && added_ports+=("${p}/tcp")
+                        done < <(grep -oE '"(port|listen_port)"\s*:\s*[0-9]+' "$f" \
+                                 | grep -oE '[0-9]+$')
+                    done
+                fi
+
+                if [ ${#added_ports[@]} -gt 0 ]; then
+                    echo -e "${GREEN}已自动放行 v2ray-agent 端口: ${added_ports[*]}${NC}"
+                else
+                    echo -e "${YELLOW}未检测到 v2ray-agent 配置文件，请手动放行端口: ufw allow <端口>/tcp${NC}"
+                fi
+            else
+                echo -e "${RED}UFW 恢复失败，请手动执行: ufw --force enable${NC}"
+            fi
+
+            # 清理备份临时文件
+            rm -f "$ufw_rules_backup" "${ufw_rules_backup}.v6" 2>/dev/null
         fi
     fi
 }
@@ -2816,7 +2969,7 @@ system_security_check() {
         # Root登录状态
         local root_status="${GREEN}✓ 安全${NC}"
         [[ "$root_login" == "yes" ]] && root_status="${RED}✗ 危险${NC}"
-        [[ "$root_login" == "without-password" ]] && root_status="${YELLOW}⚠ 仅密钥${NC}"
+        [[ "$root_login" == "without-password" || "$root_login" == "prohibit-password" ]] && root_status="${YELLOW}⚠ 仅密钥${NC}"
         
         # 密码认证状态
         local pwd_status="${GREEN}✓ 已禁用${NC}"
@@ -2887,35 +3040,35 @@ system_security_hardening() {
 
     if [[ "$confirm" == "yes" ]]; then
         echo -e "${YELLOW}开始系统安全加固...${NC}"
-        
+
         # 备份关键配置文件
-        sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
-        sudo cp /etc/security/pwquality.conf /etc/security/pwquality.conf.backup
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+        [ -f /etc/security/pwquality.conf ] && cp /etc/security/pwquality.conf /etc/security/pwquality.conf.backup
 
         # 执行安全加固
-        sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
-        
-        # 禁用不必要的服务
-        sudo systemctl disable bluetooth
-        sudo systemctl disable cups
-        
-        # 设置最大登录尝试次数和超时
-        sudo sed -i 's/.*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
-        sudo sed -i 's/.*LoginGraceTime.*/LoginGraceTime 30s/' /etc/ssh/sshd_config
-        
+        apt update && apt upgrade -y && apt autoremove -y
+
+        # 禁用不必要的服务（忽略不存在的服务）
+        systemctl disable bluetooth 2>/dev/null || true
+        systemctl disable cups 2>/dev/null || true
+
+        # 设置最大登录尝试次数和超时（复用已有函数，兼容注释行）
+        modify_ssh_config "MaxAuthTries" "3"
+        modify_ssh_config "LoginGraceTime" "30"
+
         # 设置更严格的密码策略
-        sudo apt-get install -y libpam-pwquality
-        sudo bash -c 'cat << EOF > /etc/security/pwquality.conf
+        apt-get install -y libpam-pwquality
+        cat > /etc/security/pwquality.conf << 'EOF'
 minlen = 12
 dcredit = -1
 ucredit = -1
 ocredit = -1
 lcredit = -1
-EOF'
-        
-        # 重启 SSH 服务
-        sudo systemctl restart ssh
-        
+EOF
+
+        # 重启 SSH 服务（兼容 Debian/Ubuntu 与 RHEL）
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh
+
         echo -e "${GREEN}系统安全加固完成！${NC}"
         echo -e "${YELLOW}建议：${NC}"
         echo -e "1. 检查并测试所有系统服务"
@@ -3039,34 +3192,40 @@ modify_dns() {
     read -p "$(echo -e ${YELLOW}"请选择 [0-4]: "${NC})" choice
     
     case $choice in
-        1) 
-            echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf > /dev/null
-            echo "nameserver 8.8.4.4" | sudo tee -a /etc/resolv.conf > /dev/null
+        1)
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+            echo "nameserver 8.8.4.4" >> /etc/resolv.conf
             echo -e "${GREEN}✓ 已设置为 Google DNS${NC}"
             ;;
-        2) 
-            echo "nameserver 1.1.1.1" | sudo tee /etc/resolv.conf > /dev/null
-            echo "nameserver 1.0.0.1" | sudo tee -a /etc/resolv.conf > /dev/null
+        2)
+            echo "nameserver 1.1.1.1" > /etc/resolv.conf
+            echo "nameserver 1.0.0.1" >> /etc/resolv.conf
             echo -e "${GREEN}✓ 已设置为 Cloudflare DNS${NC}"
             ;;
-        3) 
-            echo "nameserver 223.5.5.5" | sudo tee /etc/resolv.conf > /dev/null
-            echo "nameserver 223.6.6.6" | sudo tee -a /etc/resolv.conf > /dev/null
+        3)
+            echo "nameserver 223.5.5.5" > /etc/resolv.conf
+            echo "nameserver 223.6.6.6" >> /etc/resolv.conf
             echo -e "${GREEN}✓ 已设置为阿里DNS${NC}"
             ;;
         4)
             read -p "$(echo -e ${YELLOW}"请输入主DNS: "${NC})" primary_dns
             read -p "$(echo -e ${YELLOW}"请输入备用DNS(可留空): "${NC})" secondary_dns
-            
-            echo "nameserver $primary_dns" | sudo tee /etc/resolv.conf > /dev/null
+
+            echo "nameserver $primary_dns" > /etc/resolv.conf
             if [ -n "$secondary_dns" ]; then
-                echo "nameserver $secondary_dns" | sudo tee -a /etc/resolv.conf > /dev/null
+                echo "nameserver $secondary_dns" >> /etc/resolv.conf
             fi
             echo -e "${GREEN}✓ DNS设置已更新${NC}"
             ;;
         0) return ;;
         *) echo -e "${RED}无效的选择${NC}" ;;
     esac
+
+    # systemd-resolved 系统需要同步配置，否则下次重启会被覆盖
+    if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        echo -e "${YELLOW}⚠ 检测到 systemd-resolved 正在运行，/etc/resolv.conf 可能在重启后被覆盖${NC}"
+        echo -e "${YELLOW}  如需持久化，建议在 /etc/systemd/resolved.conf 中配置 DNS= 项${NC}"
+    fi
 }
 
 # 13-2 系统时区修改函数
@@ -3098,17 +3257,17 @@ modify_timezone() {
     read -p "$(echo -e ${YELLOW}"请选择 [0-7]: "${NC})" choice
     
     case $choice in
-        1) sudo timedatectl set-timezone Asia/Shanghai ;;
-        2) sudo timedatectl set-timezone Asia/Hong_Kong ;;
-        3) sudo timedatectl set-timezone Asia/Tokyo ;;
-        4) sudo timedatectl set-timezone America/Los_Angeles ;;
-        5) sudo timedatectl set-timezone America/New_York ;;
-        6) sudo timedatectl set-timezone Europe/London ;;
+        1) timedatectl set-timezone Asia/Shanghai ;;
+        2) timedatectl set-timezone Asia/Hong_Kong ;;
+        3) timedatectl set-timezone Asia/Tokyo ;;
+        4) timedatectl set-timezone America/Los_Angeles ;;
+        5) timedatectl set-timezone America/New_York ;;
+        6) timedatectl set-timezone Europe/London ;;
         7)
             echo -e "${YELLOW}可用时区列表:${NC}"
             timedatectl list-timezones | less
             read -p "$(echo -e ${YELLOW}"请输入时区名称: "${NC})" custom_timezone
-            sudo timedatectl set-timezone "$custom_timezone"
+            timedatectl set-timezone "$custom_timezone"
             ;;
         0) return ;;
         *) echo -e "${RED}无效的选择${NC}" ;;
@@ -3134,9 +3293,15 @@ network_diagnostic() {
     echo -e ""
     echo -e "${BOLD} DNS 解析测试${NC}"
     echo -e ""
-    while IFS= read -r line; do
-        echo -e "$line"
-    done < <(dig google.com +short)
+    if command -v dig &>/dev/null; then
+        dig google.com +short
+    elif command -v nslookup &>/dev/null; then
+        nslookup google.com 2>&1 | grep -E "Address|Name"
+    elif command -v host &>/dev/null; then
+        host google.com
+    else
+        echo -e "${YELLOW}未找到 dig/nslookup/host，跳过 DNS 解析测试${NC}"
+    fi
     
     # 路由追踪
     echo -e ""
@@ -3188,31 +3353,31 @@ ipv6_settings() {
         1)
             if [ "$ipv6_disabled" == "1" ]; then
                 # 启用IPv6
-                echo "0" | sudo tee /proc/sys/net/ipv6/conf/all/disable_ipv6 > /dev/null
-                echo "0" | sudo tee /proc/sys/net/ipv6/conf/default/disable_ipv6 > /dev/null
+                echo "0" | tee /proc/sys/net/ipv6/conf/all/disable_ipv6 > /dev/null
+                echo "0" | tee /proc/sys/net/ipv6/conf/default/disable_ipv6 > /dev/null
                 
                 # 永久修改
                 if [ -f /etc/sysctl.conf ]; then
-                    sudo sed -i '/net.ipv6.conf.all.disable_ipv6/d' /etc/sysctl.conf
-                    sudo sed -i '/net.ipv6.conf.default.disable_ipv6/d' /etc/sysctl.conf
-                    echo "net.ipv6.conf.all.disable_ipv6 = 0" | sudo tee -a /etc/sysctl.conf > /dev/null
-                    echo "net.ipv6.conf.default.disable_ipv6 = 0" | sudo tee -a /etc/sysctl.conf > /dev/null
-                    sudo sysctl -p > /dev/null
+                    sed -i '/net.ipv6.conf.all.disable_ipv6/d' /etc/sysctl.conf
+                    sed -i '/net.ipv6.conf.default.disable_ipv6/d' /etc/sysctl.conf
+                    echo "net.ipv6.conf.all.disable_ipv6 = 0" | tee -a /etc/sysctl.conf > /dev/null
+                    echo "net.ipv6.conf.default.disable_ipv6 = 0" | tee -a /etc/sysctl.conf > /dev/null
+                    sysctl -p > /dev/null
                 fi
                 
                 echo -e "${GREEN}IPv6已成功启用${NC}"
             else
                 # 禁用IPv6
-                echo "1" | sudo tee /proc/sys/net/ipv6/conf/all/disable_ipv6 > /dev/null
-                echo "1" | sudo tee /proc/sys/net/ipv6/conf/default/disable_ipv6 > /dev/null
+                echo "1" | tee /proc/sys/net/ipv6/conf/all/disable_ipv6 > /dev/null
+                echo "1" | tee /proc/sys/net/ipv6/conf/default/disable_ipv6 > /dev/null
                 
                 # 永久修改
                 if [ -f /etc/sysctl.conf ]; then
-                    sudo sed -i '/net.ipv6.conf.all.disable_ipv6/d' /etc/sysctl.conf
-                    sudo sed -i '/net.ipv6.conf.default.disable_ipv6/d' /etc/sysctl.conf
-                    echo "net.ipv6.conf.all.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
-                    echo "net.ipv6.conf.default.disable_ipv6 = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
-                    sudo sysctl -p > /dev/null
+                    sed -i '/net.ipv6.conf.all.disable_ipv6/d' /etc/sysctl.conf
+                    sed -i '/net.ipv6.conf.default.disable_ipv6/d' /etc/sysctl.conf
+                    echo "net.ipv6.conf.all.disable_ipv6 = 1" | tee -a /etc/sysctl.conf > /dev/null
+                    echo "net.ipv6.conf.default.disable_ipv6 = 1" | tee -a /etc/sysctl.conf > /dev/null
+                    sysctl -p > /dev/null
                 fi
                 
                 echo -e "${GREEN}IPv6已成功禁用${NC}"
@@ -3371,24 +3536,24 @@ modify_hostname() {
     
     # 对于使用hostnamectl的系统（systemd）
     if command -v hostnamectl &> /dev/null; then
-        sudo hostnamectl set-hostname "$new_hostname"
+        hostnamectl set-hostname "$new_hostname"
     else
         # 传统方式设置主机名
-        sudo hostname "$new_hostname"
+        hostname "$new_hostname"
         
         # 永久保存主机名
         if [ -f /etc/hostname ]; then
-            echo "$new_hostname" | sudo tee /etc/hostname > /dev/null
+            echo "$new_hostname" | tee /etc/hostname > /dev/null
         fi
     fi
     
     # 更新/etc/hosts文件中的主机名
     if [ -f /etc/hosts ]; then
         # 备份hosts文件
-        sudo cp /etc/hosts /etc/hosts.bak
+        cp /etc/hosts /etc/hosts.bak
         
         # 更新localhost行中的主机名
-        sudo sed -i "s/127.0.1.1.*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
+        sed -i "s/127.0.1.1.*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
         
         echo -e "${GREEN}已在/etc/hosts文件中更新主机名${NC}"
     fi
@@ -3435,10 +3600,10 @@ edit_hosts_file() {
     fi
     
     # 备份hosts文件
-    sudo cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
+    cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
     
     # 添加新映射到hosts文件
-    echo "$ip_address $domain_name" | sudo tee -a /etc/hosts > /dev/null
+    echo "$ip_address $domain_name" | tee -a /etc/hosts > /dev/null
     
     echo -e "${GREEN}已成功添加映射: ${ip_address} → ${domain_name}${NC}"
     echo -e "${GREEN}hosts文件已备份为: /etc/hosts.bak.$(date +%Y%m%d%H%M%S)${NC}"
@@ -3472,10 +3637,10 @@ view_hosts_file() {
             fi
             
             # 备份hosts文件
-            sudo cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
+            cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
             
             # 删除包含该域名的行
-            sudo sed -i "/[[:space:]]$domain_to_delete[[:space:]]*$/d" /etc/hosts
+            sed -i "/[[:space:]]$domain_to_delete[[:space:]]*$/d" /etc/hosts
             
             echo -e "${GREEN}已删除域名 ${domain_to_delete} 的映射${NC}"
             ;;
